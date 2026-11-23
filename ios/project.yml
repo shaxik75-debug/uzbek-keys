@@ -1,0 +1,51 @@
+# XcodeGen project: run "xcodegen generate" in this folder (done automatically by .github/workflows/ios.yml)
+name: UzbekKeys
+options:
+  bundleIdPrefix: uz.uzbekkeys
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  UzbekKeys:
+    type: application
+    platform: iOS
+    sources: [App]
+    info:
+      path: Supporting/App-Info.plist
+      properties:
+        CFBundleDisplayName: Uzbek Keys
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.uzbekkeys.app
+    dependencies:
+      - target: Keyboard
+  Keyboard:
+    type: app-extension
+    platform: iOS
+    sources: [Keyboard]
+    info:
+      path: Supporting/Keyboard-Info.plist
+      properties:
+        CFBundleDisplayName: Uzbek Keys
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: uz
+            RequestsOpenAccess: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uz.uzbekkeys.app.keyboard
