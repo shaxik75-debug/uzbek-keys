@@ -5,5 +5,5 @@
     <subtype
         android:imeSubtypeLocale="uz"
         android:imeSubtypeMode="keyboard"
-        android:label="O'zbekcha (ö ğ ş ç)" />
+        android:label="@string/subtype_label" />
 </input-method>
