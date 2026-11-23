@@ -1,0 +1,54 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        working-directory: ios
+        run: |
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -project UzbekKeys.xcodeproj -target UzbekKeys -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Release-iphoneos/UzbekKeys.app Payload/
+          ls Payload/UzbekKeys.app/PlugIns
+          zip -qry UzbekKeys.ipa Payload
+          echo "${{ github.run_number }}" > ios-version.txt
+
+      - name: Publish to release "ios"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios
+          name: Uzbek Keys for iPhone
+          body: |
+            iPhone keyboard (unsigned). Install UzbekKeys.ipa with Sideloadly using your Apple ID.
+            Build ${{ github.run_number }}.
+          make_latest: 'false'
+          files: |
+            UzbekKeys.ipa
+            ios-version.txt
