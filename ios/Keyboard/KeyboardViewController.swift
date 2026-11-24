@@ -112,9 +112,9 @@ final class KeyboardViewController: UIInputViewController {
     private var lastReplacement: String?
     private var toggleNotice: String?
 
-    private var replacementsOn: Bool {
-        get { UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "enabled") }
+    // Read once, kept in memory; written back only when it changes.
+    private var replacementsOn = true {
+        didSet { UserDefaults.standard.set(replacementsOn, forKey: "enabled") }
     }
 
     // MARK: Views
@@ -148,30 +148,57 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: Appearance
 
-    private var isDark: Bool {
-        textDocumentProxy.keyboardAppearance == .dark || traitCollection.userInterfaceStyle == .dark
-    }
+    // Colours are worked out once per appearance change, not on every key press.
+    private var isDark = false
+    private var appearanceReady = false
+    private var keyColor: UIColor = .white
+    private var specialColor: UIColor = .white
+    private var pressedSpecialColor: UIColor = .lightGray
+    private var textColor: UIColor = .black
+    private var hintColor: UIColor = .gray
+    private var subColor: UIColor = .gray
+    private var offColor: UIColor = .gray
+    private var disabledColor: UIColor = .gray
+    private var shadowCG: CGColor = UIColor.black.cgColor
+    private var shadowOpacity: Float = 0
+    private var symbolCache: [String: UIImage] = [:]
+    private var fullAccess = false
+    private let soundQueue = DispatchQueue(label: "uz.uzbekkeys.sound", qos: .userInteractive)
+
     private var isLandscape: Bool {
         let s = UIScreen.main.bounds.size
         return s.width > s.height
     }
     /// iOS 26 draws every key in the same colour and without a shadow.
-    private var glassStyle: Bool {
+    private let glassStyle: Bool = {
         if #available(iOS 26.0, *) { return true }
         return false
+    }()
+
+    /// Returns true when the colours changed (the keys then need restyling).
+    @discardableResult
+    private func refreshAppearance() -> Bool {
+        let d = textDocumentProxy.keyboardAppearance == .dark || traitCollection.userInterfaceStyle == .dark
+        if appearanceReady && d == isDark { return false }
+        appearanceReady = true
+        isDark = d
+        keyColor = d ? UIColor(white: 0.43, alpha: 1) : .white
+        if glassStyle {
+            specialColor = keyColor
+            pressedSpecialColor = d ? UIColor(white: 0.62, alpha: 1) : UIColor(white: 0.80, alpha: 1)
+        } else {
+            specialColor = d ? UIColor(white: 0.27, alpha: 1) : UIColor(red: 0.67, green: 0.69, blue: 0.73, alpha: 1)
+            pressedSpecialColor = keyColor
+        }
+        textColor = d ? .white : .black
+        hintColor = textColor.withAlphaComponent(0.6)
+        subColor = textColor.withAlphaComponent(0.45)
+        offColor = textColor.withAlphaComponent(0.35)
+        disabledColor = textColor.withAlphaComponent(0.3)
+        shadowCG = UIColor(white: 0, alpha: d ? 0.45 : 0.3).cgColor
+        shadowOpacity = glassStyle ? 0 : 1
+        return true
     }
-    private var keyColor: UIColor { isDark ? UIColor(white: 0.43, alpha: 1) : .white }
-    private var specialColor: UIColor {
-        if glassStyle { return keyColor }
-        return isDark ? UIColor(white: 0.27, alpha: 1) : UIColor(red: 0.67, green: 0.69, blue: 0.73, alpha: 1)
-    }
-    private var pressedSpecialColor: UIColor {
-        if glassStyle { return isDark ? UIColor(white: 0.62, alpha: 1) : UIColor(white: 0.80, alpha: 1) }
-        return keyColor
-    }
-    private var textColor: UIColor { isDark ? .white : .black }
-    private var shadowOpacity: Float { glassStyle ? 0 : 1 }
-    private var shadowColor: UIColor { UIColor(white: 0, alpha: isDark ? 0.45 : 0.3) }
 
     // MARK: Lifecycle
 
@@ -203,6 +230,8 @@ final class KeyboardViewController: UIInputViewController {
         h.isActive = true
         heightConstraint = h
 
+        replacementsOn = UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true
+        refreshAppearance()
         buildKeys()
     }
 
@@ -214,10 +243,18 @@ final class KeyboardViewController: UIInputViewController {
         lastReplacement = nil
         toggleNotice = nil
         if shift == 2 { shift = 0 }
-        mode = .letters
-        buildKeys()
+        fullAccess = hasFullAccess
+        if fullAccess { haptic.prepare() }
+        // Rebuild the keys only when the layout really changed; otherwise just refresh their look.
+        let hasNext = rows.last?.contains(where: { $0.id == "NEXT" }) ?? false
+        if mode != .letters || rows.isEmpty || hasNext != needsInputModeSwitchKey {
+            mode = .letters
+            buildKeys()
+        } else {
+            refreshAppearance()
+            restyleKeys()
+        }
         updateAutoShift()
-        if hasFullAccess { haptic.prepare() }
     }
 
     override func viewWillLayoutSubviews() {
@@ -232,13 +269,13 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
-        restyleKeys()
+        if refreshAppearance() { restyleKeys() } else { restyleDynamicKeys() }
         updateAutoShift()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
-        restyleKeys()
+        if refreshAppearance() { restyleKeys() }
     }
 
     // MARK: Building and layout
@@ -356,7 +393,11 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: Styling
 
     private func symbol(_ name: String, size: CGFloat = 20) -> UIImage? {
-        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular))
+        let cacheKey = "\(name)-\(size)"
+        if let img = symbolCache[cacheKey] { return img }
+        let img = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular))
+        symbolCache[cacheKey] = img
+        return img
     }
 
     private func isCharacter(_ id: String) -> Bool { id.count == 1 }
@@ -375,7 +416,7 @@ final class KeyboardViewController: UIInputViewController {
     private func style(_ k: KeyView) {
         let id = k.id
         let special = !isCharacter(id) && id != "SPACE"
-        k.layer.shadowColor = shadowColor.cgColor
+        k.layer.shadowColor = shadowCG
         k.layer.shadowOpacity = shadowOpacity
         k.label.textColor = textColor
         k.label.alpha = cursorTouch == nil ? 1 : 0
@@ -398,10 +439,10 @@ final class KeyboardViewController: UIInputViewController {
         case "TOGGLE":
             k.label.text = "öğ"
             k.label.font = .systemFont(ofSize: 19, weight: .semibold)
-            k.label.textColor = replacementsOn ? UIColor.systemGreen : textColor.withAlphaComponent(0.35)
+            k.label.textColor = replacementsOn ? UIColor.systemGreen : offColor
         case "SPACE":
             k.label.font = .systemFont(ofSize: 15)
-            k.label.textColor = textColor.withAlphaComponent(0.6)
+            k.label.textColor = hintColor
             if let n = toggleNotice {
                 k.label.text = n
             } else if let r = lastReplacement, let o = lastOriginal {
@@ -410,7 +451,7 @@ final class KeyboardViewController: UIInputViewController {
                 k.label.text = "\(from) → \(to)"
             }
             k.subLabel.text = "uz"
-            k.subLabel.textColor = textColor.withAlphaComponent(0.45)
+            k.subLabel.textColor = subColor
         case "RET":
             styleReturn(k)
         case "SYM1", "SYM2", "ABC":
@@ -453,8 +494,8 @@ final class KeyboardViewController: UIInputViewController {
             k.icon.image = symbol(n, size: 21)
         }
         if returnDisabled {
-            k.label.textColor = textColor.withAlphaComponent(0.3)
-            k.icon.tintColor = textColor.withAlphaComponent(0.3)
+            k.label.textColor = disabledColor
+            k.icon.tintColor = disabledColor
         } else if blue {
             k.baseColor = .systemBlue
             k.pressedColor = UIColor.systemBlue.withAlphaComponent(0.7)
@@ -500,10 +541,10 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func clickFeedback() {
-        guard hasFullAccess else { return }
-        AudioServicesPlaySystemSound(1104)
+        guard fullAccess else { return }
+        // The click sound is played off the main thread so it never delays the key.
+        soundQueue.async { AudioServicesPlaySystemSound(1104) }
         haptic.impactOccurred()
-        haptic.prepare()
     }
 
     // MARK: Touches
@@ -535,7 +576,7 @@ final class KeyboardViewController: UIInputViewController {
         cancelHold()
         guard let k = key(at: t.location(in: keysView)) else { return }
         touchKeys[t] = k
-        clickFeedback()
+        defer { clickFeedback() }      // show the key first, then sound/vibration
         switch k.id {
         case "DEL":
             k.isPressed = true
