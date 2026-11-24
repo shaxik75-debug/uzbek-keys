@@ -20,6 +20,7 @@ ExeURL := "https://github.com/shaxik75-debug/uzbek-keys/releases/latest/download
 ; Phrases (fire after Space, Enter or punctuation, whole word only):
 ;   aa  -> Assalomu Alaykum
 ;   vv  -> Va Alaykum Assalom
+;   rr  -> Rahmat
 ; ScrollLock or Ctrl+Alt+U: switch everything off / on.
 ; Nothing is applied in terminals and code editors (list below).
 
@@ -38,6 +39,7 @@ StartupLink := A_Startup "\Uzbek Keys.lnk"
 TitleItem := "Uzbek Keys " AppVersion
 AuthorItem := "by işax"
 HelpItem := "Qanday foydalaniş / Инструкция"
+WhatsNewItem := "Yangiliklar / Что нового"
 TipText := TitleItem " — " AuthorItem
 Menu, Tray, NoStandard
 Menu, Tray, Tip, %TipText%
@@ -47,6 +49,7 @@ Menu, Tray, Add, %AuthorItem%, TrayNoop
 Menu, Tray, Disable, %AuthorItem%
 Menu, Tray, Add
 Menu, Tray, Add, %HelpItem%, TrayHelp
+Menu, Tray, Add, %WhatsNewItem%, TrayWhatsNew
 Menu, Tray, Add, Check for updates, TrayCheck
 Menu, Tray, Add, Start with Windows, TrayStartup
 Menu, Tray, Add
@@ -68,6 +71,7 @@ o'  →  ö          g'  →  ğ
 sh  →  ş          ch  →  ç
 aa + probel / пробел  →  Assalomu Alaykum
 vv + probel / пробел  →  Va Alaykum Assalom
+rr + probel / пробел  →  Rahmat
 
 ⌫ darhol bossangiz — almaşiş bekor böladi.
 ⌫ сразу после замены — вернуть как было (например, для английского «sh»).
@@ -83,12 +87,32 @@ Yangilanişlar özi örnatiladi. / Обновления ставятся сам�
 by işax
 )
 
+; What this version adds or fixes. build.py puts the text of whatsnew.txt in place of the marker line.
+WhatsNew =
+(
+@@WHATSNEW@@
+)
+
 ; Show the instructions once, on the first start on this computer.
+FileCreateDir, %A_AppData%\UzbekKeys
 HelpSeen := A_AppData "\UzbekKeys\help-shown"
-if !FileExist(HelpSeen) {
-    FileCreateDir, %A_AppData%\UzbekKeys
+FirstRun := !FileExist(HelpSeen)
+if (FirstRun) {
     FileAppend, 1, %HelpSeen%
     SetTimer, TrayHelp, -1500
+}
+
+; After an update, show once what is new (not on the very first start).
+LastVerFile := A_AppData "\UzbekKeys\last-version"
+LastSeen := ""
+if FileExist(LastVerFile)
+    FileRead, LastSeen, %LastVerFile%
+LastSeen := Trim(LastSeen)
+if ("v" LastSeen != "v" AppVersion) {
+    FileDelete, %LastVerFile%
+    FileAppend, %AppVersion%, %LastVerFile%
+    if (!FirstRun && !InStr(WhatsNew, "@@WHATSNEW@@"))
+        SetTimer, TrayWhatsNew, -2500
 }
 
 ScrollLock::
@@ -112,6 +136,13 @@ return
 
 TrayHelp:
     MsgBox, 64, Uzbek Keys %AppVersion% — by işax, %HelpText%
+return
+
+TrayWhatsNew:
+    if InStr(WhatsNew, "@@WHATSNEW@@")
+        MsgBox, 64, Uzbek Keys %AppVersion%, Yangiliklar yöq. / Нет описания изменений.
+    else
+        MsgBox, 64, Uzbek Keys %AppVersion% — Yangiliklar / Что нового, %WhatsNew%
 return
 
 TrayCheck:
@@ -248,6 +279,7 @@ UndoEnd(ih) {
 ; --- Phrases: whole word only, lowercase only ---
 :*0?0C:aa::Assalomu Alaykum
 :*0?0C:vv::Va Alaykum Assalom
+:*0?0C:rr::Rahmat
 
 ; --- Letters: fire inside words, instantly ---
 :*?CX:o'::Rep("{U+00F6}", "o'")
