@@ -6,10 +6,15 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/android.yml'
+      - 'tools/make_icon.py'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -25,6 +30,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Draw launcher icons
+        run: |
+          pip install pillow
+          python tools/make_icon.py android android/app/src/main/res
 
       - name: Signing key
         env:
