@@ -24,6 +24,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Draw app icon
+        run: swift ios/tools/make_icon.swift ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+
       - name: Generate project
         working-directory: ios
         run: |
