@@ -6,6 +6,7 @@ on:
     paths:
       - 'ios/**'
       - '.github/workflows/ios.yml'
+      - 'whatsnew.txt'
   workflow_dispatch:
 
 permissions:
@@ -27,6 +28,9 @@ jobs:
       - name: Draw app icon
         run: swift ios/tools/make_icon.swift ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 
+      - name: Bundle "what's new"
+        run: cp whatsnew.txt ios/App/whatsnew.txt
+
       - name: Generate project
         working-directory: ios
         run: |
@@ -44,17 +48,23 @@ jobs:
           mkdir -p Payload
           cp -R ios/build/Release-iphoneos/UzbekKeys.app Payload/
           ls Payload/UzbekKeys.app/PlugIns
+          ls Payload/UzbekKeys.app/whatsnew.txt
           zip -qry UzbekKeys.ipa Payload
           echo "${{ github.run_number }}" > ios-version.txt
+          {
+            echo "iPhone keyboard (unsigned). Install UzbekKeys.ipa with Sideloadly using your Apple ID. Build ${{ github.run_number }}."
+            echo
+            echo "Yangiliklar / Что нового:"
+            echo
+            cat whatsnew.txt
+          } > release-notes.md
 
       - name: Publish to release "ios"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ios
           name: Uzbek Keys for iPhone
-          body: |
-            iPhone keyboard (unsigned). Install UzbekKeys.ipa with Sideloadly using your Apple ID.
-            Build ${{ github.run_number }}.
+          body_path: release-notes.md
           make_latest: 'false'
           files: |
             UzbekKeys.ipa
