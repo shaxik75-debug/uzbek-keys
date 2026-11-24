@@ -7,6 +7,7 @@ on:
       - 'windows/**'
       - 'tools/make_icon.py'
       - '.github/workflows/windows.yml'
+      - 'whatsnew.txt'
   workflow_dispatch:
 
 permissions:
@@ -60,7 +61,14 @@ jobs:
         run: |
           VERSION="1.${{ github.run_number }}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          python windows/tools/build.py --ahk ahk --script windows/uzbek_auto.ahk --icon uzbek.ico --version "$VERSION" --out uzbek_auto.exe
+          python windows/tools/build.py --ahk ahk --script windows/uzbek_auto.ahk --icon uzbek.ico --version "$VERSION" --whatsnew whatsnew.txt --out uzbek_auto.exe
+          {
+            echo "Windows build $VERSION. Installed copies update themselves."
+            echo
+            echo "Yangiliklar / Что нового:"
+            echo
+            cat whatsnew.txt
+          } > release-notes.md
           python windows/tools/build.py --ahk ahk --script windows/tools/selftest.ahk --icon uzbek.ico --out selftest.exe
 
       - name: Self-test compiled exe
@@ -78,8 +86,7 @@ jobs:
         with:
           tag_name: v${{ env.VERSION }}
           name: Uzbek Keys ${{ env.VERSION }} for Windows
-          body: |
-            Windows build ${{ env.VERSION }}. Installed copies update themselves.
+          body_path: release-notes.md
           make_latest: 'true'
           files: uzbek_auto.exe
 
