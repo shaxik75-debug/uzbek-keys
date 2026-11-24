@@ -10,6 +10,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.inputmethodservice.InputMethodService;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -30,39 +31,46 @@ import android.widget.TextView;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Uzbek Keys keyboard, same look and behaviour as the iPhone version.
- * While typing: o' -> ö, g' -> ğ, sh -> ş, ch -> ç (capitals too),
- * aa -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom", rr -> "Rahmat" (whole word, after space/punctuation/enter).
+ * Uzbek Keys keyboard, same look and behaviour as the Apple keyboard. by işax
+ * Keyboards: Yangi lotin (o' -> ö, g' -> ğ, sh -> ş, ch -> ç), Oʻzbekcha (o' -> oʻ, g' -> gʻ),
+ * Ўзбекча (Cyrillic), Русский, English; the flag key switches between the ones turned on in the app.
+ * aa / Aa / AA -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom", rr -> "Rahmat" (Cyrillic: аа, вв, рр).
  * Backspace right after a replacement brings back what was typed; the space bar shows the last replacement.
- * The "öğ" key turns replacements on and off.
- * Key popups, fast typing with several fingers, long-press o/g/s/c for ö/ğ/ş/ç,
+ * Word suggestions from the words the user types, emoji panel, key colour / shape / height / weight,
+ * key click volume, key popups, fast typing with several fingers, long-press alternates,
  * double space = ". ", hold space and slide to move the cursor, hold 123 and slide to a symbol.
  */
 public class UzbekIME extends InputMethodService {
 
-    private static final String[][] LETTERS = {
-            {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
-            {"a", "s", "d", "f", "g", "h", "j", "k", "l", "'"},
-            {"SHIFT", "z", "x", "c", "v", "b", "n", "m", "DEL"},
-            {"SYM1", "NEXT", "TOGGLE", "SPACE", "RET"}
-    };
+    private static final String[] LAT_UZ = {"qwertyuiop", "asdfghjkl'", "zxcvbnm"};
+    private static final String[] LAT_EN = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+    private static final String[] CYR_UZ = {"йцукенгшўзх", "фқвапролджэ", "ячсмитғбюҳ"};
+    private static final String[] CYR_RU = {"йцукенгшщзх", "фывапролджэ", "ячсмитьбю"};
     private static final String[][] SYMBOLS = {
             {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
             {"-", "/", ":", ";", "(", ")", "$", "&", "@", "\""},
-            {"SYM2", ".", ",", "?", "!", "'", "DEL"},
-            {"ABC", "NEXT", "TOGGLE", "SPACE", "RET"}
+            {".", ",", "?", "!", "'"}
     };
     private static final String[][] SYMBOLS2 = {
             {"[", "]", "{", "}", "#", "%", "^", "*", "+", "="},
             {"_", "\\", "|", "~", "<", ">", "€", "£", "₽", "•"},
-            {"SYM1", ".", ",", "?", "!", "'", "DEL"},
-            {"ABC", "NEXT", "TOGGLE", "SPACE", "RET"}
+            {".", ",", "?", "!", "'"}
     };
+    private static final String[][] LAT_PHRASES = {
+            {"aa", "Assalomu Alaykum"}, {"vv", "Va Alaykum Assalom"}, {"rr", "Rahmat"}
+    };
+    private static final String[][] CYR_PHRASES = {
+            {"аа", "Ассалому алайкум"}, {"вв", "Ва алайкум ассалом"}, {"рр", "Раҳмат"}
+    };
+
+    private static final int MODE_EMOJI = 3;
+    private static final int EMOJI_COLS = 8;
 
     private static final int BG_DARK = 0xFF2C2C2E;
     private static final int BG_LIGHT = 0xFFD3D6DC;
@@ -88,11 +96,14 @@ public class UzbekIME extends InputMethodService {
     private final List<List<Key>> rows = new ArrayList<>();
 
     private SharedPreferences prefs;
+    private KeyPrefs kp;
+    private WordMemory memory;
+    private AudioManager audio;
     private LinearLayout root;
     private KeyboardView kv;
     private TextView banner;
 
-    private int mode = 0;          // 0 letters, 1 symbols, 2 more symbols
+    private int mode = 0;          // 0 letters, 1 symbols, 2 more symbols, 3 emoji
     private int shift = 0;         // 0 off, 1 next letter, 2 caps lock
     private long lastShiftTap = 0;
     private long lastSpaceTap = 0;
@@ -100,6 +111,36 @@ public class UzbekIME extends InputMethodService {
     private String lastOriginal = null;
     private String lastReplacement = null;
     private String toggleNotice = null;
+
+    // Settings (from the app).
+    private String lang = "YA";
+    private int langCount = 1;
+    private boolean phrasesOn = true;
+    private boolean suggestOn = true;
+    private int shapeIdx = 0;
+    private int heightIdx = 1;
+    private int themeMode = 0;
+    private int volume = 40;
+    private int cmode = KeyPrefs.COLOR_APPLE;
+    private int oneColor = KEY_LIGHT;
+    private int oneSp = KEY_LIGHT;
+    private HashMap<String, Integer> custom = new HashMap<>();
+    private Typeface letterFace = Typeface.DEFAULT;
+    private Typeface specialFace = Typeface.DEFAULT;
+
+    // Suggestions bar.
+    private List<String> suggestions = new ArrayList<>();
+    private int barPointer = -1;
+    private int barSlot = -1;
+
+    // Emoji panel.
+    private int emojiCat = 1;
+    private float emojiScroll = 0;
+    private int emojiPointer = -1;
+    private int emojiTab = -1;
+    private float emojiDownY = 0;
+    private float emojiLastY = 0;
+    private boolean emojiScrolling = false;
 
     // Touch tracking (one entry per finger).
     private final SparseArray<Key> pointerKeys = new SparseArray<>();
@@ -130,13 +171,68 @@ public class UzbekIME extends InputMethodService {
 
     private float gridTop, gridKeyH, gridGap;
 
+    private final SharedPreferences.OnSharedPreferenceChangeListener prefListener =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(SharedPreferences sp, String key) {
+                    if (key == null || key.equals("recent") || key.equals("remote") || key.equals("lastCheck")) return;
+                    if (key.equals("memClear")) {
+                        memory.clearCache();
+                        suggestions = new ArrayList<>();
+                        invalidateKeys();
+                        return;
+                    }
+                    loadSettings();
+                    if (root != null) root.setBackgroundColor(isDark() ? BG_DARK : BG_LIGHT);
+                    buildKeys();
+                    if (kv != null) kv.requestLayout();
+                }
+            };
+
     // ---------------------------------------------------------------- lifecycle
 
     @Override
     public void onCreate() {
         super.onCreate();
         prefs = getSharedPreferences("uk", MODE_PRIVATE);
-        enabled = prefs.getBoolean("enabled", true);
+        kp = new KeyPrefs(this);
+        memory = new WordMemory(this);
+        audio = (AudioManager) getSystemService(AUDIO_SERVICE);
+        loadSettings();
+        prefs.registerOnSharedPreferenceChangeListener(prefListener);
+    }
+
+    @Override
+    public void onDestroy() {
+        prefs.unregisterOnSharedPreferenceChangeListener(prefListener);
+        memory.save();
+        super.onDestroy();
+    }
+
+    private void loadSettings() {
+        langCount = kp.enabledLangs().size();
+        lang = kp.lang();
+        enabled = kp.replace();
+        phrasesOn = kp.phrases();
+        suggestOn = kp.suggest();
+        shapeIdx = kp.shape();
+        heightIdx = kp.height();
+        themeMode = kp.theme();
+        volume = kp.volume();
+        cmode = kp.colorMode();
+        oneColor = kp.oneColor();
+        oneSp = kp.oneSpecial();
+        custom = kp.customColors();
+        int w = kp.weight();
+        letterFace = face(w);
+        specialFace = face(Math.min(w, 500));
+    }
+
+    private static Typeface face(int weight) {
+        if (weight >= 600) return Typeface.DEFAULT_BOLD;
+        if (weight >= 500) return Typeface.create("sans-serif-medium", Typeface.NORMAL);
+        if (weight <= 300) return Typeface.create("sans-serif-light", Typeface.NORMAL);
+        return Typeface.DEFAULT;
     }
 
     @Override
@@ -178,6 +274,7 @@ public class UzbekIME extends InputMethodService {
     @Override
     public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        loadSettings();
         lastOriginal = null;
         lastReplacement = null;
         toggleNotice = null;
@@ -188,7 +285,9 @@ public class UzbekIME extends InputMethodService {
         mode = (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE) ? 1 : 0;
         if (shift == 2) shift = 0;
         buildKeys();
+        if (kv != null) kv.requestLayout();
         updateAutoShift();
+        updateSuggestions();
         if (root != null) root.setBackgroundColor(isDark() ? BG_DARK : BG_LIGHT);
         Updater.maybeCheck(this, new Updater.Callback() {
             @Override
@@ -206,7 +305,10 @@ public class UzbekIME extends InputMethodService {
         pointerKeys.clear();
         armed.clear();
         modePointer = altPointer = cursorPointer = -1;
+        barPointer = barSlot = -1;
+        emojiPointer = emojiTab = -1;
         popupKey = null;
+        memory.save();
     }
 
     @Override
@@ -224,6 +326,7 @@ public class UzbekIME extends InputMethodService {
         // Moved by the user or the app: read the text again next time it is needed.
         resetCache(newSelStart);
         updateAutoShift();
+        updateSuggestions();
         invalidateKeys();
     }
 
@@ -238,6 +341,8 @@ public class UzbekIME extends InputMethodService {
     }
 
     private boolean isDark() {
+        if (themeMode == 1) return false;
+        if (themeMode == 2) return true;
         return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
     }
@@ -246,17 +351,55 @@ public class UzbekIME extends InputMethodService {
         return getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
     }
 
+    private boolean isCyrillic() {
+        return lang.equals("UZ") || lang.equals("RU");
+    }
+
+    private boolean hasToggle() {
+        return lang.equals("YA") || lang.equals("OZ");
+    }
+
+    private boolean offerNext() {
+        return Build.VERSION.SDK_INT < 28 || shouldOfferSwitchingToNextInputMethod();
+    }
+
     private static boolean isCharacter(String id) {
         return id.length() == 1;
     }
 
-    private static String alternate(String id) {
-        switch (id) {
-            case "o": return "ö";
-            case "g": return "ğ";
-            case "s": return "ş";
-            case "c": return "ç";
-            default: return null;
+    private String alternate(String id) {
+        switch (lang) {
+            case "YA":
+                switch (id) {
+                    case "o": return "ö";
+                    case "g": return "ğ";
+                    case "s": return "ş";
+                    case "c": return "ç";
+                    default: return null;
+                }
+            case "OZ":
+                switch (id) {
+                    case "o": return "oʻ";
+                    case "g": return "gʻ";
+                    default: return null;
+                }
+            case "UZ":
+                switch (id) {
+                    case "е": return "ё";
+                    case "х": return "ъ";
+                    case "ш": return "щ";
+                    case "и": return "ы";
+                    case "б": return "ь";
+                    default: return null;
+                }
+            case "RU":
+                switch (id) {
+                    case "е": return "ё";
+                    case "ь": return "ъ";
+                    default: return null;
+                }
+            default:
+                return null;
         }
     }
 
@@ -264,18 +407,58 @@ public class UzbekIME extends InputMethodService {
         if (kv != null) kv.invalidate();
     }
 
+    private String[] letterRows() {
+        switch (lang) {
+            case "UZ": return CYR_UZ;
+            case "RU": return CYR_RU;
+            case "EN": return LAT_EN;
+            default: return LAT_UZ;
+        }
+    }
+
+    private static List<Key> keysOf(String s) {
+        List<Key> row = new ArrayList<>();
+        for (int i = 0; i < s.length(); i++) row.add(new Key(String.valueOf(s.charAt(i))));
+        return row;
+    }
+
+    private static List<Key> keysOf(String[] ids) {
+        List<Key> row = new ArrayList<>();
+        for (String id : ids) row.add(new Key(id));
+        return row;
+    }
+
     private void buildKeys() {
         rows.clear();
         popupKey = null;
-        String[][] src = mode == 0 ? LETTERS : (mode == 1 ? SYMBOLS : SYMBOLS2);
-        boolean offerNext = Build.VERSION.SDK_INT < 28 || shouldOfferSwitchingToNextInputMethod();
-        for (String[] r : src) {
-            List<Key> row = new ArrayList<>();
-            for (String id : r) {
-                if (id.equals("NEXT") && !offerNext) continue;
-                row.add(new Key(id));
+        if (mode != MODE_EMOJI) {
+            if (mode == 0) {
+                String[] src = letterRows();
+                rows.add(keysOf(src[0]));
+                rows.add(keysOf(src[1]));
+                List<Key> r3 = new ArrayList<>();
+                r3.add(new Key("SHIFT"));
+                r3.addAll(keysOf(src[2]));
+                r3.add(new Key("DEL"));
+                rows.add(r3);
+            } else {
+                String[][] src = mode == 1 ? SYMBOLS : SYMBOLS2;
+                rows.add(keysOf(src[0]));
+                rows.add(keysOf(src[1]));
+                List<Key> r3 = new ArrayList<>();
+                r3.add(new Key(mode == 1 ? "SYM2" : "SYM1"));
+                r3.addAll(keysOf(src[2]));
+                r3.add(new Key("DEL"));
+                rows.add(r3);
             }
-            rows.add(row);
+            List<Key> bottom = new ArrayList<>();
+            bottom.add(new Key(mode == 0 ? "SYM1" : "ABC"));
+            if (langCount > 1 || offerNext()) bottom.add(new Key("LANG"));
+            bottom.add(new Key("EMOJI"));
+            if (hasToggle()) bottom.add(new Key("TOGGLE"));
+            bottom.add(new Key("SPACE"));
+            bottom.add(new Key("RET"));
+            rows.add(bottom);
         }
         if (kv != null) {
             kv.layoutKeys(kv.getWidth(), kv.getHeight());
@@ -299,19 +482,36 @@ public class UzbekIME extends InputMethodService {
         return best;
     }
 
+    private void playClick(String id) {
+        if (volume <= 0 || audio == null) return;
+        int fx = AudioManager.FX_KEYPRESS_STANDARD;
+        if ("DEL".equals(id)) fx = AudioManager.FX_KEYPRESS_DELETE;
+        else if ("SPACE".equals(id)) fx = AudioManager.FX_KEYPRESS_SPACEBAR;
+        else if ("RET".equals(id)) fx = AudioManager.FX_KEYPRESS_RETURN;
+        try {
+            audio.playSoundEffect(fx, volume / 100f);
+        } catch (Exception ignored) {
+        }
+    }
+
     // ---------------------------------------------------------------- labels
 
     private String label(String id) {
         switch (id) {
             case "SHIFT": return shift == 2 ? "⇪" : (shift == 1 ? "⬆" : "⇧");
             case "DEL": return "⌫";
-            case "NEXT": return "🌐";
+            case "LANG": {
+                if (langCount <= 1) return "🌐";
+                int i = KeyPrefs.langIndex(lang);
+                return KeyPrefs.LANG_FLAGS[i] + " " + KeyPrefs.LANG_SHORT[i];
+            }
+            case "EMOJI": return "😊";
             case "TOGGLE": return "öğ";
             case "SPACE": return spaceHint();
             case "RET": return returnLabel();
             case "SYM1": return "123";
             case "SYM2": return "#+=";
-            case "ABC": return "ABC";
+            case "ABC": return isCyrillic() ? "АБВ" : "ABC";
             default:
                 return (mode == 0 && shift > 0) ? id.toUpperCase(Locale.ROOT) : id;
         }
@@ -322,7 +522,7 @@ public class UzbekIME extends InputMethodService {
         if (lastReplacement != null && lastOriginal != null) {
             return lastOriginal.trim() + " → " + lastReplacement.trim();
         }
-        return "";
+        return KeyPrefs.LANG_NAMES[KeyPrefs.langIndex(lang)];
     }
 
     private int imeAction() {
@@ -334,13 +534,14 @@ public class UzbekIME extends InputMethodService {
     }
 
     private String returnLabel() {
+        boolean cyr = isCyrillic();
         switch (imeAction()) {
-            case EditorInfo.IME_ACTION_GO: return "go";
-            case EditorInfo.IME_ACTION_SEARCH: return "search";
-            case EditorInfo.IME_ACTION_SEND: return "send";
-            case EditorInfo.IME_ACTION_DONE: return "done";
-            case EditorInfo.IME_ACTION_NEXT: return "next";
-            case EditorInfo.IME_ACTION_PREVIOUS: return "prev";
+            case EditorInfo.IME_ACTION_GO: return cyr ? "перейти" : "go";
+            case EditorInfo.IME_ACTION_SEARCH: return cyr ? "поиск" : "search";
+            case EditorInfo.IME_ACTION_SEND: return cyr ? "отпр." : "send";
+            case EditorInfo.IME_ACTION_DONE: return cyr ? "готово" : "done";
+            case EditorInfo.IME_ACTION_NEXT: return cyr ? "далее" : "next";
+            case EditorInfo.IME_ACTION_PREVIOUS: return cyr ? "назад" : "prev";
             default: return "↵";
         }
     }
@@ -351,12 +552,109 @@ public class UzbekIME extends InputMethodService {
                 || a == EditorInfo.IME_ACTION_SEND || a == EditorInfo.IME_ACTION_DONE;
     }
 
+    // ---------------------------------------------------------------- suggestions
+
+    private String suggestionForSlot(int slot) {
+        int idx = slot == 1 ? 0 : (slot == 0 ? 1 : 2);   // best guess in the middle, like Apple
+        return slot >= 0 && idx < suggestions.size() ? suggestions.get(idx) : null;
+    }
+
+    private static String trailingWord(String b) {
+        int i = b.length();
+        while (i > 0 && WordMemory.isWordChar(b.charAt(i - 1))) i--;
+        while (i < b.length() && !Character.isLetter(b.charAt(i))) i++;
+        return b.substring(i);
+    }
+
+    private void updateSuggestions() {
+        List<String> out = new ArrayList<>();
+        if (suggestOn && mode == 0 && !hasSelection()) {
+            InputConnection ic = getCurrentInputConnection();
+            if (ic != null) {
+                String w = trailingWord(before(ic));
+                if (!w.isEmpty()) {
+                    boolean cap = Character.isUpperCase(w.charAt(0));
+                    for (String s : memory.suggest(lang, w, 3)) {
+                        out.add(cap ? s.substring(0, 1).toUpperCase(Locale.ROOT) + s.substring(1) : s);
+                    }
+                }
+            }
+        }
+        suggestions = out;
+    }
+
+    private void learnBefore(String b) {
+        if (!suggestOn) return;
+        String w = trailingWord(b);
+        if (w.length() < 2 || phraseFor(w) != null) return;
+        memory.learn(lang, w);
+    }
+
+    private void pickSuggestion(int slot) {
+        String word = suggestionForSlot(slot);
+        InputConnection ic = getCurrentInputConnection();
+        if (word == null || ic == null) return;
+        String w = trailingWord(before(ic));
+        ic.beginBatchEdit();
+        if (w.length() > 0) cachedDelete(ic, w.length());
+        cachedCommit(ic, word + " ");
+        ic.endBatchEdit();
+        markPending();
+        lastOriginal = null;
+        lastReplacement = null;
+        toggleNotice = null;
+        memory.learn(lang, word);
+        playClick("x");
+        if (shift == 1) setShift(0);
+        afterEdit();
+    }
+
+    // ---------------------------------------------------------------- emoji
+
+    private String[] emojiList(int cat) {
+        return cat == 0 ? kp.recentEmoji() : Emojis.list(cat);
+    }
+
+    private void openEmoji() {
+        mode = MODE_EMOJI;
+        emojiCat = kp.recentEmoji().length > 0 ? 0 : 1;
+        emojiScroll = 0;
+        emojiPointer = -1;
+        emojiTab = -1;
+        toggleNotice = null;
+        pointerKeys.clear();
+        armed.clear();
+        buildKeys();
+    }
+
+    private void closeEmoji() {
+        mode = 0;
+        buildKeys();
+        updateAutoShift();
+        updateSuggestions();
+    }
+
+    private void typeEmoji(String em) {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        lastOriginal = null;
+        lastReplacement = null;
+        if (hasSelection()) {
+            ic.commitText(em, 1);
+            forgetCache();
+        } else {
+            cachedCommit(ic, em);
+            markPending();
+        }
+        kp.addRecentEmoji(em);
+    }
+
     // ---------------------------------------------------------------- view
 
     private final class KeyboardView extends View {
         private final Paint keyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint subPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint capPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF tmp = new RectF();
         private final Paint.FontMetrics fm = new Paint.FontMetrics();
@@ -364,22 +662,38 @@ public class UzbekIME extends InputMethodService {
         KeyboardView(Context c) {
             super(c);
             textPaint.setTextAlign(Paint.Align.CENTER);
-            subPaint.setTextAlign(Paint.Align.RIGHT);
-            subPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            capPaint.setTextAlign(Paint.Align.LEFT);
             strokePaint.setStyle(Paint.Style.STROKE);
             strokePaint.setStrokeWidth(dp(0.7f));
             setHapticFeedbackEnabled(true);
         }
 
         private float keyHeight() {
-            return dp(isLandscape() ? 33 : 42);
+            if (isLandscape()) return dp(33);
+            return dp(heightIdx == 0 ? 36 : (heightIdx == 2 ? 50 : 42));
+        }
+
+        private float barH() {
+            return suggestOn ? dp(isLandscape() ? 30 : 38) : 0;
+        }
+
+        private float emojiCapH() {
+            return dp(26);
+        }
+
+        private float emojiTabsH() {
+            return dp(44);
+        }
+
+        private float emojiCellH() {
+            return dp(46);
         }
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             boolean land = isLandscape();
             int width = MeasureSpec.getSize(widthMeasureSpec);
-            float h = dp(land ? 6 : 10) + dp(land ? 4 : 6) + 3 * dp(land ? 7 : 11) + 4 * keyHeight();
+            float h = barH() + dp(land ? 6 : 10) + dp(land ? 4 : 6) + 3 * dp(land ? 7 : 11) + 4 * keyHeight();
             setMeasuredDimension(width, (int) Math.ceil(h));
         }
 
@@ -390,21 +704,25 @@ public class UzbekIME extends InputMethodService {
         }
 
         void layoutKeys(int W, int H) {
-            if (W <= 0 || H <= 0) return;
+            if (W <= 0 || H <= 0 || rows.size() < 4) return;
             boolean land = isLandscape();
             float side = dp(land ? 5 : 6);
-            float gap = dp(6);
+            float g10 = dp(6);
+            float bar = barH();
             float topPad = dp(land ? 6 : 10);
             float bottomPad = dp(land ? 4 : 6);
             float rowGap = dp(land ? 7 : 11);
-            float keyH = (H - topPad - bottomPad - 3 * rowGap) / 4f;
-            float unit = (W - 2 * side - 9 * gap) / 10f;
-            gridTop = topPad;
+            float keyH = (H - bar - topPad - bottomPad - 3 * rowGap) / 4f;
+            int cols = Math.max(10, Math.max(rows.get(0).size(), rows.get(1).size()));
+            float gap = cols > 10 ? dp(4.5f) : g10;
+            float unit = (W - 2 * side - (cols - 1) * gap) / cols;
+            float unit10 = (W - 2 * side - 9 * g10) / 10f;
+            gridTop = bar + topPad;
             gridKeyH = keyH;
             gridGap = rowGap;
             for (int r = 0; r < rows.size(); r++) {
                 List<Key> row = rows.get(r);
-                float y = topPad + r * (keyH + rowGap);
+                float y = gridTop + r * (keyH + rowGap);
                 int n = row.size();
                 if (r < 2) {
                     float x = (W - (n * unit + (n - 1) * gap)) / 2f;
@@ -413,40 +731,59 @@ public class UzbekIME extends InputMethodService {
                         x += unit + gap;
                     }
                 } else if (r == 2) {
-                    float wide = unit * 1.3f + dp(2);
                     int m = n - 2;
-                    row.get(0).r.set(side, y, side + wide, y + keyH);
                     if (mode == 0) {
-                        float x = (W - (m * unit + (m - 1) * gap)) / 2f;
-                        for (int i = 1; i <= m; i++) {
-                            row.get(i).r.set(x, y, x + unit, y + keyH);
-                            x += unit + gap;
+                        float wide = unit10 * 1.3f + dp(2);
+                        float lw = unit;
+                        float need = m * lw + (m - 1) * gap + 2 * wide + 2 * g10 + 2 * side;
+                        if (need > W) {
+                            wide = Math.max(unit, wide - (need - W) / 2f);
+                            need = m * lw + (m - 1) * gap + 2 * wide + 2 * gap + 2 * side;
+                            if (need > W) lw = (W - 2 * side - 2 * wide - (m + 1) * gap) / m;
                         }
+                        row.get(0).r.set(side, y, side + wide, y + keyH);
+                        float x = (W - (m * lw + (m - 1) * gap)) / 2f;
+                        for (int i = 1; i <= m; i++) {
+                            row.get(i).r.set(x, y, x + lw, y + keyH);
+                            x += lw + gap;
+                        }
+                        row.get(n - 1).r.set(W - side - wide, y, W - side, y + keyH);
                     } else {
-                        float inner = W - 2 * side - 2 * wide - 4 * gap;
-                        float w = (inner - (m - 1) * gap) / m;
-                        float x = side + wide + 2 * gap;
+                        float wide = unit10 * 1.3f + dp(2);
+                        float inner = W - 2 * side - 2 * wide - 4 * g10;
+                        float w = (inner - (m - 1) * g10) / m;
+                        row.get(0).r.set(side, y, side + wide, y + keyH);
+                        float x = side + wide + 2 * g10;
                         for (int i = 1; i <= m; i++) {
                             row.get(i).r.set(x, y, x + w, y + keyH);
-                            x += w + gap;
+                            x += w + g10;
                         }
+                        row.get(n - 1).r.set(W - side - wide, y, W - side, y + keyH);
                     }
-                    row.get(n - 1).r.set(W - side - wide, y, W - side, y + keyH);
                 } else {
                     float[] fixed = new float[n];
-                    float used = (n - 1) * gap;
+                    float used = (n - 1) * g10;
                     for (int i = 0; i < n; i++) {
                         String id = row.get(i).id;
-                        fixed[i] = id.equals("SPACE") ? 0 : (id.equals("RET") ? unit * 2.7f + gap : unit * 1.3f + dp(2));
-                        used += fixed[i];
+                        float w;
+                        switch (id) {
+                            case "SPACE": w = 0; break;
+                            case "RET": w = unit10 * 1.9f; break;
+                            case "LANG": w = unit10 * (langCount > 1 ? 1.5f : 1.1f); break;
+                            case "EMOJI":
+                            case "TOGGLE": w = unit10 * 1.05f; break;
+                            default: w = unit10 * 1.25f;
+                        }
+                        fixed[i] = w;
+                        used += w;
                     }
-                    float spaceW = Math.max(unit, W - 2 * side - used);
+                    float spaceW = Math.max(unit10, W - 2 * side - used);
                     float x = side;
                     for (int i = 0; i < n; i++) {
                         Key k = row.get(i);
                         float w = k.id.equals("SPACE") ? spaceW : fixed[i];
                         k.r.set(x, y, x + w, y + keyH);
-                        x += w + gap;
+                        x += w + g10;
                     }
                 }
             }
@@ -456,50 +793,114 @@ public class UzbekIME extends InputMethodService {
         protected void onDraw(Canvas c) {
             boolean dark = isDark();
             c.drawColor(dark ? BG_DARK : BG_LIGHT);
-            float rad = dp(8.5f);
+            if (mode == MODE_EMOJI) {
+                drawEmoji(c, dark);
+                return;
+            }
+            if (barH() > 0) drawBar(c, dark);
+            int count = 0;
+            for (List<Key> row : rows) count += row.size();
+            int idx = 0;
             for (List<Key> row : rows) {
-                for (Key k : row) drawKey(c, k, dark, rad);
+                for (Key k : row) drawKey(c, k, dark, idx++, count);
             }
             if (popupKey != null) drawPopup(c, dark);
         }
 
-        private void drawKey(Canvas c, Key k, boolean dark, float rad) {
+        private void drawBar(Canvas c, boolean dark) {
+            float bh = barH();
             int fg = dark ? Color.WHITE : Color.BLACK;
-            int bg = dark ? KEY_DARK : KEY_LIGHT;
-            boolean blue = k.id.equals("RET") && returnIsBlue();
+            float cw = getWidth() / 3f;
+            textPaint.setTypeface(Typeface.DEFAULT);
+            textPaint.setTextSize(sp(16));
+            textPaint.getFontMetrics(fm);
+            for (int i = 0; i < 3; i++) {
+                if (i > 0) {
+                    keyPaint.setColor((fg & 0x00FFFFFF) | 0x33000000);
+                    c.drawRect(i * cw - dp(0.5f), bh * 0.28f, i * cw + dp(0.5f), bh * 0.72f, keyPaint);
+                }
+                String s = suggestionForSlot(i);
+                if (s == null) continue;
+                if (barSlot == i) {
+                    keyPaint.setColor(dark ? 0x33FFFFFF : 0x22000000);
+                    tmp.set(i * cw + dp(3), dp(3), (i + 1) * cw - dp(3), bh - dp(2));
+                    c.drawRoundRect(tmp, dp(8), dp(8), keyPaint);
+                }
+                textPaint.setColor(fg);
+                c.drawText(ellipsize(s, cw - dp(12)), i * cw + cw / 2f, bh / 2f - (fm.ascent + fm.descent) / 2f, textPaint);
+            }
+        }
+
+        private String ellipsize(String s, float maxW) {
+            if (textPaint.measureText(s) <= maxW) return s;
+            String t = s;
+            while (t.length() > 1 && textPaint.measureText(t + "…") > maxW) t = t.substring(0, t.length() - 1);
+            return t + "…";
+        }
+
+        private int baseColor(Key k, boolean special, boolean dark, int index, int count) {
+            switch (cmode) {
+                case KeyPrefs.COLOR_ONE:
+                    return special ? oneSp : oneColor;
+                case KeyPrefs.COLOR_RAINBOW:
+                    return Color.HSVToColor(new float[]{(index * 330f) / Math.max(1, count),
+                            dark ? 0.55f : 0.40f, dark ? 0.62f : 1f});
+                case KeyPrefs.COLOR_EACH: {
+                    Integer col = custom.get(k.id);
+                    if (col != null) return col;
+                    break;
+                }
+                default:
+                    break;
+            }
+            return dark ? KEY_DARK : KEY_LIGHT;
+        }
+
+        private void drawKey(Canvas c, Key k, boolean dark, int index, int count) {
+            boolean special = !isCharacter(k.id) && !k.id.equals("SPACE");
+            boolean apple = cmode == KeyPrefs.COLOR_APPLE
+                    || (cmode == KeyPrefs.COLOR_EACH && !custom.containsKey(k.id));
+            int bg = baseColor(k, special, dark, index, count);
+            int fg = apple ? (dark ? Color.WHITE : Color.BLACK) : KeyPrefs.textOn(bg);
+            boolean blue = apple && k.id.equals("RET") && returnIsBlue();
             if (blue) {
                 bg = k.pressed ? BLUE_PRESSED : BLUE;
                 fg = Color.WHITE;
             } else if (k.pressed) {
-                bg = dark ? PRESSED_DARK : PRESSED_LIGHT;
+                bg = apple ? (dark ? PRESSED_DARK : PRESSED_LIGHT) : KeyPrefs.darker(bg, 0.8f);
             }
             keyPaint.setColor(bg);
+            float rad = shapeIdx == 2 ? Math.min(k.r.width(), k.r.height()) / 2f : dp(shapeIdx == 1 ? 13 : 8.5f);
             c.drawRoundRect(k.r, rad, rad, keyPaint);
             if (cursorPointer != -1) return;          // labels hidden while moving the cursor
 
             String text = label(k.id);
             float size;
             int color = fg;
-            Typeface face = Typeface.DEFAULT;
+            Typeface face = special ? specialFace : letterFace;
             switch (k.id) {
                 case "SHIFT":
                 case "DEL":
                     size = sp(22);
                     break;
-                case "NEXT":
+                case "LANG":
+                    size = sp(langCount > 1 ? 15 : 20);
+                    break;
+                case "EMOJI":
                     size = sp(20);
                     break;
                 case "TOGGLE":
                     size = sp(19);
                     face = Typeface.DEFAULT_BOLD;
-                    color = enabled ? GREEN : ((fg & 0x00FFFFFF) | 0x59000000);
+                    color = enabled ? (apple ? GREEN : fg) : ((fg & 0x00FFFFFF) | 0x59000000);
                     break;
                 case "SPACE":
                     size = sp(15);
+                    face = specialFace;
                     color = (fg & 0x00FFFFFF) | 0x99000000;
                     break;
                 case "RET":
-                    size = text.length() == 1 ? sp(22) : sp(17);
+                    size = text.length() == 1 ? sp(22) : sp(16);
                     break;
                 case "SYM1":
                 case "SYM2":
@@ -519,11 +920,6 @@ public class UzbekIME extends InputMethodService {
                 textPaint.getFontMetrics(fm);
                 c.drawText(text, k.r.centerX(), k.r.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
             }
-            if (k.id.equals("SPACE")) {
-                subPaint.setTextSize(sp(12));
-                subPaint.setColor((fg & 0x00FFFFFF) | 0x73000000);
-                c.drawText("uz", k.r.right - dp(9), k.r.bottom - dp(6), subPaint);
-            }
         }
 
         private void drawPopup(Canvas c, boolean dark) {
@@ -535,34 +931,254 @@ public class UzbekIME extends InputMethodService {
             tmp.set(x, y, x + w, y + h);
             keyPaint.setColor(popupHighlight ? BLUE : (dark ? 0xFF8E8E90 : Color.WHITE));
             c.drawRoundRect(tmp, dp(10), dp(10), keyPaint);
-            strokePaint.setColor(dark ? 0x33000000 : 0x33000000);
+            strokePaint.setColor(0x33000000);
             c.drawRoundRect(tmp, dp(10), dp(10), strokePaint);
-            textPaint.setTypeface(Typeface.DEFAULT);
+            textPaint.setTypeface(letterFace);
             textPaint.setTextSize(sp(34));
             textPaint.setColor(popupHighlight || dark ? Color.WHITE : Color.BLACK);
+            float maxW = w - dp(6);
+            float tw = textPaint.measureText(popupText);
+            if (tw > maxW && tw > 0) textPaint.setTextSize(sp(34) * maxW / tw);
             textPaint.getFontMetrics(fm);
             c.drawText(popupText, tmp.centerX(), tmp.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
         }
 
+        // ------------------------------------------------ emoji panel
+
+        private float centerOffset() {
+            textPaint.getFontMetrics(fm);
+            return -(fm.ascent + fm.descent) / 2f;
+        }
+
+        private void drawEmoji(Canvas c, boolean dark) {
+            int fg = dark ? Color.WHITE : Color.BLACK;
+            float W = getWidth();
+            float H = getHeight();
+            float top = emojiCapH();
+            float tabsTop = H - emojiTabsH();
+            float cellH = emojiCellH();
+            float cw = W / EMOJI_COLS;
+
+            capPaint.setTextSize(sp(12));
+            capPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            capPaint.setColor((fg & 0x00FFFFFF) | 0x8C000000);
+            c.drawText(Emojis.TITLES[emojiCat], dp(12), top - dp(8), capPaint);
+
+            String[] list = emojiList(emojiCat);
+            c.save();
+            c.clipRect(0, top, W, tabsTop);
+            textPaint.setTypeface(Typeface.DEFAULT);
+            if (list.length == 0) {
+                textPaint.setTextSize(sp(14));
+                textPaint.setColor((fg & 0x00FFFFFF) | 0x8C000000);
+                c.drawText("Bu yerda oxirgi smayliklar böladi", W / 2f, top + dp(40), textPaint);
+                c.drawText("Здесь будут недавние смайлики", W / 2f, top + dp(62), textPaint);
+            } else {
+                textPaint.setTextSize(sp(28));
+                textPaint.setColor(Color.BLACK);
+                float dy = centerOffset();
+                int first = Math.max(0, (int) (emojiScroll / cellH)) * EMOJI_COLS;
+                for (int i = first; i < list.length; i++) {
+                    int r = i / EMOJI_COLS;
+                    int col = i % EMOJI_COLS;
+                    float y = top + r * cellH - emojiScroll;
+                    if (y > tabsTop) break;
+                    c.drawText(list[i], col * cw + cw / 2f, y + cellH / 2f + dy, textPaint);
+                }
+            }
+            c.restore();
+
+            int n = Emojis.ICONS.length;
+            float uw = W / (n + 3f);
+            float ty = tabsTop + emojiTabsH() / 2f;
+            textPaint.setTypeface(specialFace);
+            textPaint.setTextSize(sp(16));
+            textPaint.setColor(emojiTab == 0 ? BLUE : fg);
+            c.drawText(isCyrillic() ? "АБВ" : "ABC", uw * 0.75f, ty + centerOffset(), textPaint);
+            textPaint.setTypeface(Typeface.DEFAULT);
+            textPaint.setTextSize(sp(19));
+            float dIcon = centerOffset();
+            for (int i = 0; i < n; i++) {
+                float cx = uw * 1.5f + uw * i + uw / 2f;
+                if (i == emojiCat) {
+                    keyPaint.setColor(dark ? 0x33FFFFFF : 0x1F000000);
+                    tmp.set(cx - uw / 2f + dp(1), tabsTop + dp(5), cx + uw / 2f - dp(1), H - dp(5));
+                    c.drawRoundRect(tmp, dp(8), dp(8), keyPaint);
+                }
+                textPaint.setColor(Color.BLACK);
+                c.drawText(Emojis.ICONS[i], cx, ty + dIcon, textPaint);
+            }
+            textPaint.setTextSize(sp(21));
+            textPaint.setColor(emojiTab == n + 1 ? BLUE : fg);
+            c.drawText("⌫", W - uw * 0.75f, ty + centerOffset(), textPaint);
+        }
+
+        private int tabAt(float x) {
+            int n = Emojis.ICONS.length;
+            float uw = getWidth() / (n + 3f);
+            if (x < uw * 1.5f) return 0;
+            if (x >= getWidth() - uw * 1.5f) return n + 1;
+            int t = 1 + (int) ((x - uw * 1.5f) / uw);
+            return Math.min(Math.max(t, 1), n);
+        }
+
+        private float clampScroll(float v) {
+            String[] list = emojiList(emojiCat);
+            int rowsN = (list.length + EMOJI_COLS - 1) / EMOJI_COLS;
+            float visible = getHeight() - emojiTabsH() - emojiCapH();
+            float max = Math.max(0, rowsN * emojiCellH() - visible);
+            return Math.min(Math.max(v, 0), max);
+        }
+
+        private String emojiAt(float x, float y) {
+            float top = emojiCapH();
+            float bottom = getHeight() - emojiTabsH();
+            if (y < top || y >= bottom) return null;
+            float cw = getWidth() / (float) EMOJI_COLS;
+            int col = Math.min(EMOJI_COLS - 1, (int) (x / cw));
+            int row = (int) ((y - top + emojiScroll) / emojiCellH());
+            int idx = row * EMOJI_COLS + col;
+            String[] list = emojiList(emojiCat);
+            return idx >= 0 && idx < list.length ? list[idx] : null;
+        }
+
+        private void emojiTouch(MotionEvent e, int act) {
+            int n = Emojis.ICONS.length;
+            switch (act) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_POINTER_DOWN: {
+                    if (emojiPointer != -1) return;
+                    int i = e.getActionIndex();
+                    emojiPointer = e.getPointerId(i);
+                    float x = e.getX(i);
+                    float y = e.getY(i);
+                    emojiDownY = y;
+                    emojiLastY = y;
+                    emojiScrolling = false;
+                    emojiTab = -1;
+                    if (y >= getHeight() - emojiTabsH()) {
+                        emojiTab = tabAt(x);
+                        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                        if (emojiTab == n + 1) {
+                            playClick("DEL");
+                            deleteBegan();
+                        } else {
+                            playClick("x");
+                        }
+                    }
+                    break;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    int i = e.findPointerIndex(emojiPointer);
+                    if (i < 0) return;
+                    float y = e.getY(i);
+                    if (emojiTab == -1) {
+                        if (!emojiScrolling && Math.abs(y - emojiDownY) > dp(8)) emojiScrolling = true;
+                        if (emojiScrolling) emojiScroll = clampScroll(emojiScroll - (y - emojiLastY));
+                    }
+                    emojiLastY = y;
+                    break;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_POINTER_UP: {
+                    int i = e.getActionIndex();
+                    if (e.getPointerId(i) != emojiPointer) return;
+                    emojiPointer = -1;
+                    float x = e.getX(i);
+                    float y = e.getY(i);
+                    if (emojiTab != -1) {
+                        int t = emojiTab;
+                        emojiTab = -1;
+                        if (t == n + 1) {
+                            deleteEnded();
+                        } else if (y >= getHeight() - emojiTabsH() - dp(10) && tabAt(x) == t) {
+                            if (t == 0) {
+                                closeEmoji();
+                            } else {
+                                emojiCat = t - 1;
+                                emojiScroll = 0;
+                            }
+                        }
+                        return;
+                    }
+                    if (!emojiScrolling) {
+                        String em = emojiAt(x, y);
+                        if (em != null) {
+                            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                            playClick("x");
+                            typeEmoji(em);
+                        }
+                    }
+                    break;
+                }
+                case MotionEvent.ACTION_CANCEL:
+                    if (emojiTab == n + 1) deleteEnded();
+                    emojiPointer = -1;
+                    emojiTab = -1;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // ------------------------------------------------ touches
+
+        private int slotAt(float x) {
+            int s = (int) (x / (getWidth() / 3f));
+            return Math.min(Math.max(s, 0), 2);
+        }
+
         @Override
         public boolean onTouchEvent(MotionEvent e) {
-            switch (e.getActionMasked()) {
+            int act = e.getActionMasked();
+            if (mode == MODE_EMOJI) {
+                emojiTouch(e, act);
+                invalidate();
+                return true;
+            }
+            switch (act) {
                 case MotionEvent.ACTION_DOWN:
                 case MotionEvent.ACTION_POINTER_DOWN: {
                     int i = e.getActionIndex();
-                    began(e.getPointerId(i), e.getX(i), e.getY(i));
+                    int pid = e.getPointerId(i);
+                    float x = e.getX(i);
+                    float y = e.getY(i);
+                    if (y < barH() && barPointer == -1 && cursorPointer == -1 && altPointer == -1) {
+                        barPointer = pid;
+                        int slot = slotAt(x);
+                        barSlot = suggestionForSlot(slot) != null ? slot : -1;
+                        break;
+                    }
+                    began(pid, x, y);
                     break;
                 }
                 case MotionEvent.ACTION_MOVE:
-                    for (int i = 0; i < e.getPointerCount(); i++) moved(e.getPointerId(i), e.getX(i), e.getY(i));
+                    for (int i = 0; i < e.getPointerCount(); i++) {
+                        int pid = e.getPointerId(i);
+                        if (pid == barPointer) continue;
+                        moved(pid, e.getX(i), e.getY(i));
+                    }
                     break;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP: {
                     int i = e.getActionIndex();
-                    ended(e.getPointerId(i), false);
+                    int pid = e.getPointerId(i);
+                    if (pid == barPointer) {
+                        int slot = barSlot;
+                        barPointer = -1;
+                        barSlot = -1;
+                        if (slot >= 0 && e.getY(i) < barH() + dp(12) && slotAt(e.getX(i)) == slot) {
+                            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                            pickSuggestion(slot);
+                        }
+                        break;
+                    }
+                    ended(pid, false);
                     break;
                 }
                 case MotionEvent.ACTION_CANCEL:
+                    barPointer = -1;
+                    barSlot = -1;
                     for (int i = 0; i < e.getPointerCount(); i++) ended(e.getPointerId(i), true);
                     break;
                 default:
@@ -623,11 +1239,13 @@ public class UzbekIME extends InputMethodService {
                 unpress(ok);
             }
         }
+        if (mode == MODE_EMOJI) return;
         cancelHold();
         Key k = keyAt(x, y);
         if (k == null) return;
         pointerKeys.put(pid, k);
         if (kv != null) kv.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        playClick(k.id);
         switch (k.id) {
             case "DEL":
                 k.pressed = true;
@@ -648,7 +1266,7 @@ public class UzbekIME extends InputMethodService {
                 }
                 break;
             }
-            case "NEXT":
+            case "LANG":
                 k.pressed = true;
                 armed.add(pid);
                 scheduleHold(pid, new Runnable() {
@@ -671,6 +1289,7 @@ public class UzbekIME extends InputMethodService {
                 break;
             case "RET":
             case "TOGGLE":
+            case "EMOJI":
                 k.pressed = true;
                 armed.add(pid);
                 break;
@@ -695,7 +1314,7 @@ public class UzbekIME extends InputMethodService {
         }
         if (pid == altPointer) return;
         Key old = pointerKeys.get(pid);
-        if (old == null || old.id.equals("DEL") || old.id.equals("NEXT")) return;
+        if (old == null || old.id.equals("DEL") || old.id.equals("LANG")) return;
         Key k = keyAt(x, y);
         if (k == null || k == old) return;
         if (pid == holdPointer) cancelHold();
@@ -706,13 +1325,14 @@ public class UzbekIME extends InputMethodService {
             case "SYM1":
             case "SYM2":
             case "ABC":
-            case "NEXT":
+            case "LANG":
             case "DEL":
                 armed.remove(pid);
                 break;
             case "SPACE":
             case "RET":
             case "TOGGLE":
+            case "EMOJI":
                 k.pressed = true;
                 armed.add(pid);
                 break;
@@ -758,10 +1378,11 @@ public class UzbekIME extends InputMethodService {
         if (k.id.equals("DEL")) deleteEnded();
         if (!cancelled && wasArmed) {
             commit(k.id);
-            if (pid == modePointer && isCharacter(k.id) && mode != 0) {
+            if (pid == modePointer && isCharacter(k.id) && mode != 0 && mode != MODE_EMOJI) {
                 mode = 0;
                 buildKeys();
                 updateAutoShift();
+                updateSuggestions();
             }
         }
         if (pid == modePointer) modePointer = -1;
@@ -816,12 +1437,16 @@ public class UzbekIME extends InputMethodService {
             case "RET":
                 enter();
                 break;
-            case "NEXT":
-                nextKeyboard();
+            case "LANG":
+                if (langCount > 1) switchLang();
+                else nextKeyboard();
+                return;
+            case "EMOJI":
+                openEmoji();
                 return;
             case "TOGGLE":
                 enabled = !enabled;
-                prefs.edit().putBoolean("enabled", enabled).apply();
+                kp.setReplace(enabled);
                 lastOriginal = null;
                 lastReplacement = null;
                 toggleNotice = enabled ? "öğ ✓" : "öğ — off";
@@ -839,10 +1464,24 @@ public class UzbekIME extends InputMethodService {
                     mode = 0;
                     buildKeys();
                     updateAutoShift();
+                    updateSuggestions();
                 }
                 return;
         }
         afterEdit();
+    }
+
+    private void switchLang() {
+        List<String> on = kp.enabledLangs();
+        int i = on.indexOf(lang);
+        lang = on.get((i + 1) % on.size());
+        kp.setLang(lang);
+        lastOriginal = null;
+        lastReplacement = null;
+        mode = 0;
+        buildKeys();
+        updateAutoShift();
+        updateSuggestions();
     }
 
     private void typeCommitted(String s) {
@@ -853,6 +1492,7 @@ public class UzbekIME extends InputMethodService {
 
     private void afterEdit() {
         updateAutoShift();
+        updateSuggestions();
         invalidateKeys();
     }
 
@@ -876,6 +1516,7 @@ public class UzbekIME extends InputMethodService {
         mode = id.equals("SYM1") ? 1 : (id.equals("SYM2") ? 2 : 0);
         buildKeys();
         if (mode == 0) updateAutoShift();
+        updateSuggestions();
     }
 
     private void spaceTapped() {
@@ -1050,10 +1691,25 @@ public class UzbekIME extends InputMethodService {
         return " \n-()[]{}':;\"/\\,.?!".indexOf(c) >= 0 || c == '‘' || c == '’' || c == 'ʻ';
     }
 
-    private static boolean endsWithWord(String before, String w) {
-        if (!before.endsWith(w)) return false;
-        int i = before.length() - w.length() - 1;
-        return i < 0 || !Character.isLetterOrDigit(before.charAt(i));
+    /** Length of the last character (emoji with joiners and flags count as one). */
+    private static int lastCharLength(String b) {
+        int end = b.length();
+        if (end == 0) return 0;
+        try {
+            int start;
+            if (Build.VERSION.SDK_INT >= 24) {
+                android.icu.text.BreakIterator bi = android.icu.text.BreakIterator.getCharacterInstance();
+                bi.setText(b);
+                start = bi.preceding(end);
+            } else {
+                java.text.BreakIterator bi = java.text.BreakIterator.getCharacterInstance();
+                bi.setText(b);
+                start = bi.preceding(end);
+            }
+            if (start >= 0 && start < end) return end - start;
+        } catch (Exception ignored) {
+        }
+        return (end >= 2 && Character.isSurrogatePair(b.charAt(end - 2), b.charAt(end - 1))) ? 2 : 1;
     }
 
     private static String replacementFor(char p, char c) {
@@ -1085,27 +1741,35 @@ public class UzbekIME extends InputMethodService {
         return null;
     }
 
-    /** Expands aa / vv before the cursor. end = what was typed after the word (may be empty). */
-    private boolean tryPhrase(InputConnection ic, String before, String end) {
-        String abbr = null;
-        String phrase = null;
-        if (endsWithWord(before, "aa")) {
-            abbr = "aa";
-            phrase = "Assalomu Alaykum";
-        } else if (endsWithWord(before, "vv")) {
-            abbr = "vv";
-            phrase = "Va Alaykum Assalom";
-        } else if (endsWithWord(before, "rr")) {
-            abbr = "rr";
-            phrase = "Rahmat";
+    /** The shortcut right before the cursor (aa, Aa or AA as a whole word) and its phrase, or null. */
+    private String[] phraseFor(String before) {
+        if (!phrasesOn) return null;
+        String[][] table = lang.equals("UZ") ? CYR_PHRASES : (hasToggle() ? LAT_PHRASES : null);
+        int n = before.length();
+        if (table == null || n < 2) return null;
+        if (n >= 3 && Character.isLetterOrDigit(before.charAt(n - 3))) return null;
+        char a = before.charAt(n - 2);
+        char b = before.charAt(n - 1);
+        boolean lower = Character.isLowerCase(a) && Character.isLowerCase(b);
+        boolean cap = Character.isUpperCase(a);
+        if (!lower && !cap) return null;
+        String w = before.substring(n - 2).toLowerCase(Locale.ROOT);
+        for (String[] t : table) {
+            if (t[0].equals(w)) return new String[]{before.substring(n - 2), t[1]};
         }
-        if (abbr == null) return false;
+        return null;
+    }
+
+    /** Expands a shortcut before the cursor. end = what was typed after the word (may be empty). */
+    private boolean tryPhrase(InputConnection ic, String before, String end) {
+        String[] ph = phraseFor(before);
+        if (ph == null) return false;
         ic.beginBatchEdit();
-        cachedDelete(ic, abbr.length());
-        cachedCommit(ic, phrase + end);
+        cachedDelete(ic, ph[0].length());
+        cachedCommit(ic, ph[1] + end);
         ic.endBatchEdit();
-        lastOriginal = abbr + end;
-        lastReplacement = phrase + end;
+        lastOriginal = ph[0] + end;
+        lastReplacement = ph[1] + end;
         return true;
     }
 
@@ -1119,12 +1783,12 @@ public class UzbekIME extends InputMethodService {
             forgetCache();
             return;
         }
-        if (enabled && s.length() == 1) {
+        if (s.length() == 1) {
             char c = s.charAt(0);
             String before = before(ic);
-            if (before.length() > 0) {
+            if (enabled && before.length() > 0) {
                 char p = before.charAt(before.length() - 1);
-                String rep = replacementFor(p, c);
+                String rep = lang.equals("YA") ? replacementFor(p, c) : null;
                 if (rep != null) {
                     ic.beginBatchEdit();
                     cachedDelete(ic, 1);
@@ -1135,10 +1799,21 @@ public class UzbekIME extends InputMethodService {
                     lastReplacement = rep;
                     return;
                 }
+                if (lang.equals("OZ") && isApos(c) && Character.isLetter(p)) {
+                    String a = (p == 'o' || p == 'O' || p == 'g' || p == 'G') ? "ʻ" : "ʼ";
+                    cachedCommit(ic, a);
+                    markPending();
+                    lastOriginal = s;
+                    lastReplacement = a;
+                    return;
+                }
             }
-            if (isEndChar(c) && tryPhrase(ic, before, s)) {
-                markPending();
-                return;
+            if (isEndChar(c)) {
+                if (tryPhrase(ic, before, s)) {
+                    markPending();
+                    return;
+                }
+                learnBefore(before);
             }
         }
         cachedCommit(ic, s);
@@ -1150,7 +1825,11 @@ public class UzbekIME extends InputMethodService {
         if (ic == null) return;
         lastOriginal = null;
         lastReplacement = null;
-        if (enabled && !hasSelection() && tryPhrase(ic, before(ic), "")) markPending();
+        if (!hasSelection()) {
+            String b = before(ic);
+            if (tryPhrase(ic, b, "")) markPending();
+            else learnBefore(b);
+        }
         int action = imeAction();
         if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
             ic.performEditorAction(action);
@@ -1190,8 +1869,7 @@ public class UzbekIME extends InputMethodService {
             forgetCache();
             return;
         }
-        int n = (b.length() >= 2 && Character.isSurrogatePair(b.charAt(b.length() - 2), b.charAt(b.length() - 1))) ? 2 : 1;
-        cachedDelete(ic, n);
+        cachedDelete(ic, lastCharLength(b));
         markPending();
     }
 }
