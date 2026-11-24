@@ -1,20 +1,21 @@
 import UIKit
 import AudioToolbox
 
-/// Uzbek Keys keyboard for iPhone, laid out and behaving like the Apple keyboard.
+/// Uzbek Keys keyboard for iPhone, laid out and behaving like the Apple keyboard (iOS 26 look).
 /// While typing: o' -> ö, g' -> ğ, sh -> ş, ch -> ç (capitals too),
 /// aa -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom" (whole word, after space/punctuation/return).
-/// Backspace (or the hint in the top bar) right after a replacement brings back what was typed.
-/// The "öğ" switch in the top bar turns replacements on/off.
+/// Backspace right after a replacement brings back what was typed; the space bar shows the last replacement.
+/// The "öğ" key (where Apple has the emoji key) turns replacements on/off.
 /// Apple-like behaviour: key popups, fast typing with several fingers, long-press o/g/s/c for ö/ğ/ş/ç,
 /// double space = ". ", hold space and slide to move the cursor, hold 123 and slide to a symbol.
 
 // MARK: - Views
 
-/// One key, drawn like an Apple keyboard key. Touches are handled by TouchView.
+/// One key. Touches are handled by TouchView.
 final class KeyView: UIView {
     let id: String
     let label = UILabel()
+    let subLabel = UILabel()
     let icon = UIImageView()
     var baseColor: UIColor = .white { didSet { applyColor() } }
     var pressedColor: UIColor = .lightGray { didSet { applyColor() } }
@@ -24,16 +25,18 @@ final class KeyView: UIView {
         self.id = id
         super.init(frame: .zero)
         isUserInteractionEnabled = false
-        layer.cornerRadius = 8
+        layer.cornerRadius = 8.5
         layer.shadowOffset = CGSize(width: 0, height: 1)
         layer.shadowRadius = 0
-        layer.shadowOpacity = 1
         label.textAlignment = .center
         label.adjustsFontSizeToFitWidth = true
         label.minimumScaleFactor = 0.5
         label.baselineAdjustment = .alignCenters
+        subLabel.textAlignment = .right
+        subLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         icon.contentMode = .center
         addSubview(label)
+        addSubview(subLabel)
         addSubview(icon)
     }
 
@@ -45,13 +48,14 @@ final class KeyView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        label.frame = bounds.insetBy(dx: 2, dy: 0)
+        label.frame = bounds.insetBy(dx: 4, dy: 0)
+        subLabel.frame = CGRect(x: 0, y: bounds.height - 17, width: bounds.width - 9, height: 14)
         icon.frame = bounds
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
     }
 }
 
-/// Receives every touch of the key area (multi-touch); the keys themselves ignore touches.
+/// Receives every touch of the keyboard (multi-touch); the keys themselves ignore touches.
 final class TouchView: UIView {
     var onBegan: ((UITouch, UIEvent?) -> Void)?
     var onMoved: ((UITouch, UIEvent?) -> Void)?
@@ -82,19 +86,19 @@ final class KeyboardViewController: UIInputViewController {
         ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
         ["a", "s", "d", "f", "g", "h", "j", "k", "l", "'"],
         ["SHIFT", "z", "x", "c", "v", "b", "n", "m", "DEL"],
-        ["SYM1", "NEXT", "SPACE", "RET"]
+        ["SYM1", "NEXT", "TOGGLE", "SPACE", "RET"]
     ]
     private let symbolsRows: [[String]] = [
         ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
         ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""],
         ["SYM2", ".", ",", "?", "!", "'", "DEL"],
-        ["ABC", "NEXT", "SPACE", "RET"]
+        ["ABC", "NEXT", "TOGGLE", "SPACE", "RET"]
     ]
     private let symbols2Rows: [[String]] = [
         ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
         ["_", "\\", "|", "~", "<", ">", "€", "£", "₽", "•"],
         ["SYM1", ".", ",", "?", "!", "'", "DEL"],
-        ["ABC", "NEXT", "SPACE", "RET"]
+        ["ABC", "NEXT", "TOGGLE", "SPACE", "RET"]
     ]
     private let alternates: [String: String] = ["o": "ö", "g": "ğ", "s": "ş", "c": "ç"]
 
@@ -106,6 +110,7 @@ final class KeyboardViewController: UIInputViewController {
     private var lastSpaceTap = Date.distantPast
     private var lastOriginal: String?
     private var lastReplacement: String?
+    private var toggleNotice: String?
 
     private var replacementsOn: Bool {
         get { UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true }
@@ -114,9 +119,6 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: Views
 
-    private let bar = UIView()
-    private let toggleButton = UIButton(type: .custom)
-    private let hintButton = UIButton(type: .custom)
     private let keysView = TouchView()
     private let popup = UIView()
     private let popupLabel = UILabel()
@@ -126,9 +128,9 @@ final class KeyboardViewController: UIInputViewController {
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     // Grid metrics, kept for hit testing.
-    private var gridTop: CGFloat = 8
+    private var gridTop: CGFloat = 10
     private var gridKeyH: CGFloat = 42
-    private var gridGap: CGFloat = 12
+    private var gridGap: CGFloat = 11
 
     // MARK: Touch tracking
 
@@ -153,11 +155,22 @@ final class KeyboardViewController: UIInputViewController {
         let s = UIScreen.main.bounds.size
         return s.width > s.height
     }
-    private var keyColor: UIColor { isDark ? UIColor(white: 0.42, alpha: 1) : .white }
+    /// iOS 26 draws every key in the same colour and without a shadow.
+    private var glassStyle: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+    private var keyColor: UIColor { isDark ? UIColor(white: 0.43, alpha: 1) : .white }
     private var specialColor: UIColor {
-        isDark ? UIColor(white: 0.27, alpha: 1) : UIColor(red: 0.67, green: 0.69, blue: 0.73, alpha: 1)
+        if glassStyle { return keyColor }
+        return isDark ? UIColor(white: 0.27, alpha: 1) : UIColor(red: 0.67, green: 0.69, blue: 0.73, alpha: 1)
+    }
+    private var pressedSpecialColor: UIColor {
+        if glassStyle { return isDark ? UIColor(white: 0.62, alpha: 1) : UIColor(white: 0.80, alpha: 1) }
+        return keyColor
     }
     private var textColor: UIColor { isDark ? .white : .black }
+    private var shadowOpacity: Float { glassStyle ? 0 : 1 }
     private var shadowColor: UIColor { UIColor(white: 0, alpha: isDark ? 0.45 : 0.3) }
 
     // MARK: Lifecycle
@@ -173,30 +186,19 @@ final class KeyboardViewController: UIInputViewController {
         keysView.onEnded = { [weak self] t, e, c in self?.touchEnded(t, e, cancelled: c) }
         view.addSubview(keysView)
 
-        toggleButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        toggleButton.layer.cornerRadius = 15
-        toggleButton.addTarget(self, action: #selector(toggleTapped), for: .touchUpInside)
-        bar.addSubview(toggleButton)
-        hintButton.titleLabel?.font = .systemFont(ofSize: 16)
-        hintButton.titleLabel?.adjustsFontSizeToFitWidth = true
-        hintButton.titleLabel?.minimumScaleFactor = 0.6
-        hintButton.addTarget(self, action: #selector(hintTapped), for: .touchUpInside)
-        bar.addSubview(hintButton)
-        view.addSubview(bar)
-
         popup.isUserInteractionEnabled = false
         popup.isHidden = true
         popup.layer.cornerRadius = 10
         popup.layer.shadowColor = UIColor.black.cgColor
         popup.layer.shadowOffset = CGSize(width: 0, height: 1)
-        popup.layer.shadowRadius = 3
+        popup.layer.shadowRadius = 4
         popup.layer.shadowOpacity = 0.3
         popupLabel.textAlignment = .center
         popupLabel.font = .systemFont(ofSize: 34, weight: .light)
         popup.addSubview(popupLabel)
         view.addSubview(popup)
 
-        let h = view.heightAnchor.constraint(equalToConstant: isLandscape ? 198 : 260)
+        let h = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
         h.priority = UILayoutPriority(999)
         h.isActive = true
         heightConstraint = h
@@ -204,10 +206,13 @@ final class KeyboardViewController: UIInputViewController {
         buildKeys()
     }
 
+    private var keyboardHeight: CGFloat { isLandscape ? 162 : 216 }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         lastOriginal = nil
         lastReplacement = nil
+        toggleNotice = nil
         if shift == 2 { shift = 0 }
         mode = .letters
         buildKeys()
@@ -217,7 +222,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        heightConstraint?.constant = isLandscape ? 198 : 260
+        heightConstraint?.constant = keyboardHeight
     }
 
     override func viewDidLayoutSubviews() {
@@ -269,19 +274,15 @@ final class KeyboardViewController: UIInputViewController {
         let W = view.bounds.width
         let H = view.bounds.height
         guard W > 0, H > 0 else { return }
-        let land = isLandscape
-        let barH: CGFloat = land ? 36 : 44
-        bar.frame = CGRect(x: 0, y: 0, width: W, height: barH)
-        toggleButton.frame = CGRect(x: 8, y: (barH - 30) / 2, width: 74, height: 30)
-        hintButton.frame = CGRect(x: 92, y: 0, width: max(0, W - 184), height: barH)
-        keysView.frame = CGRect(x: 0, y: barH, width: W, height: H - barH)
+        keysView.frame = view.bounds
 
-        let side: CGFloat = 3
+        let land = isLandscape
+        let side: CGFloat = land ? 5 : 6
         let gapX: CGFloat = 6
-        let topPad: CGFloat = land ? 5 : 8
-        let bottomPad: CGFloat = land ? 3 : 4
-        let rowGap: CGFloat = land ? 7 : 12
-        let keyH = max(20, (keysView.bounds.height - topPad - bottomPad - 3 * rowGap) / 4)
+        let topPad: CGFloat = land ? 6 : 10
+        let bottomPad: CGFloat = land ? 4 : 6
+        let rowGap: CGFloat = land ? 7 : 11
+        let keyH = max(20, (H - topPad - bottomPad - 3 * rowGap) / 4)
         let unit = (W - 2 * side - 9 * gapX) / 10
         gridTop = topPad
         gridKeyH = keyH
@@ -312,6 +313,7 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 add(W - side - wide, wide)
             } else {
+                // Apple bottom row: 123 | emoji (here: öğ) | space | return
                 let fixed: [CGFloat] = row.map { k in
                     switch k.id {
                     case "SPACE": return 0
@@ -361,84 +363,103 @@ final class KeyboardViewController: UIInputViewController {
 
     private func restyleKeys() {
         for k in rows.joined() { style(k) }
-        updateBar()
+    }
+
+    /// Restyles only the keys that change while typing.
+    private func restyleDynamicKeys() {
+        for k in rows.joined() where k.id == "SPACE" || k.id == "RET" || k.id == "TOGGLE" {
+            style(k)
+        }
     }
 
     private func style(_ k: KeyView) {
         let id = k.id
         let special = !isCharacter(id) && id != "SPACE"
         k.layer.shadowColor = shadowColor.cgColor
+        k.layer.shadowOpacity = shadowOpacity
         k.label.textColor = textColor
+        k.label.alpha = cursorTouch == nil ? 1 : 0
+        k.icon.alpha = cursorTouch == nil ? 1 : 0
         k.icon.tintColor = textColor
         k.label.text = nil
+        k.subLabel.text = nil
         k.icon.image = nil
         k.baseColor = special ? specialColor : keyColor
-        k.pressedColor = special ? keyColor : specialColor
+        k.pressedColor = special ? pressedSpecialColor : specialColor
+        if glassStyle && !special { k.pressedColor = pressedSpecialColor }
         switch id {
         case "SHIFT":
             k.icon.image = symbol(shift == 2 ? "capslock.fill" : (shift == 1 ? "shift.fill" : "shift"))
-            if shift > 0 { k.baseColor = keyColor }
+            if shift > 0 && !glassStyle { k.baseColor = keyColor }
         case "DEL":
             k.icon.image = symbol("delete.left", size: 21)
         case "NEXT":
             k.icon.image = symbol("globe")
+        case "TOGGLE":
+            k.label.text = "öğ"
+            k.label.font = .systemFont(ofSize: 19, weight: .semibold)
+            k.label.textColor = replacementsOn ? UIColor.systemGreen : textColor.withAlphaComponent(0.35)
         case "SPACE":
-            k.label.text = "Özbek"
-            k.label.font = .systemFont(ofSize: 16)
+            k.label.font = .systemFont(ofSize: 15)
+            k.label.textColor = textColor.withAlphaComponent(0.6)
+            if let n = toggleNotice {
+                k.label.text = n
+            } else if let r = lastReplacement, let o = lastOriginal {
+                let from = o.trimmingCharacters(in: .whitespacesAndNewlines)
+                let to = r.trimmingCharacters(in: .whitespacesAndNewlines)
+                k.label.text = "\(from) → \(to)"
+            }
+            k.subLabel.text = "uz"
+            k.subLabel.textColor = textColor.withAlphaComponent(0.45)
         case "RET":
             styleReturn(k)
         case "SYM1", "SYM2", "ABC":
             k.label.text = id == "SYM1" ? "123" : (id == "SYM2" ? "#+=" : "ABC")
-            k.label.font = .systemFont(ofSize: 16)
+            k.label.font = .systemFont(ofSize: 17)
         default:
             let upper = mode == .letters && shift > 0
             k.label.text = upper ? id.uppercased() : id
-            k.label.font = .systemFont(ofSize: mode == .letters ? 25 : 23, weight: .light)
+            k.label.font = .systemFont(ofSize: mode == .letters ? 26 : 24, weight: .regular)
         }
+    }
+
+    private var returnDisabled: Bool {
+        let p = textDocumentProxy
+        guard p.enablesReturnKeyAutomatically == true else { return false }
+        return (p.documentContextBeforeInput ?? "").isEmpty && (p.documentContextAfterInput ?? "").isEmpty
     }
 
     private func styleReturn(_ k: KeyView) {
         var title: String?
+        var iconName: String?
         var blue = true
         switch textDocumentProxy.returnKeyType ?? .default {
         case .go: title = "go"
-        case .google, .search, .yahoo: title = "search"
+        case .google, .search, .yahoo: iconName = "magnifyingglass"
         case .join: title = "join"
         case .next: title = "next"; blue = false
         case .route: title = "route"
-        case .send: title = "send"
+        case .send: iconName = "arrow.up"
         case .done: title = "done"
-        case .emergencyCall: title = "emergency"
+        case .emergencyCall: title = "SOS"
         case .continue: title = "continue"; blue = false
-        default: title = nil; blue = false
+        default: iconName = "return.left"; blue = false
         }
         if let t = title {
             k.label.text = t
-            k.label.font = .systemFont(ofSize: 16)
-        } else {
-            k.icon.image = symbol("return.left")
+            k.label.font = .systemFont(ofSize: 17)
         }
-        if blue {
+        if let n = iconName {
+            k.icon.image = symbol(n, size: 21)
+        }
+        if returnDisabled {
+            k.label.textColor = textColor.withAlphaComponent(0.3)
+            k.icon.tintColor = textColor.withAlphaComponent(0.3)
+        } else if blue {
             k.baseColor = .systemBlue
-            k.pressedColor = keyColor
+            k.pressedColor = UIColor.systemBlue.withAlphaComponent(0.7)
             k.label.textColor = .white
             k.icon.tintColor = .white
-        }
-    }
-
-    private func updateBar() {
-        let on = replacementsOn
-        toggleButton.setTitle(on ? "öğ ✓" : "öğ off", for: .normal)
-        toggleButton.backgroundColor = on ? UIColor(red: 0.20, green: 0.66, blue: 0.33, alpha: 1) : specialColor
-        toggleButton.setTitleColor(on ? .white : textColor, for: .normal)
-        if let r = lastReplacement, let o = lastOriginal {
-            let from = o.trimmingCharacters(in: .whitespacesAndNewlines)
-            let to = r.trimmingCharacters(in: .whitespacesAndNewlines)
-            hintButton.setTitle("\(from) → \(to)   ↶", for: .normal)
-            hintButton.setTitleColor(textColor, for: .normal)
-            hintButton.isHidden = false
-        } else {
-            hintButton.isHidden = true
         }
     }
 
@@ -451,7 +472,7 @@ final class KeyboardViewController: UIInputViewController {
         let x = min(max(f.midX - w / 2, 2), view.bounds.width - w - 2)
         let y = max(f.minY - h + 6, 0)
         popup.frame = CGRect(x: x, y: y, width: w, height: h)
-        popup.backgroundColor = highlighted ? .systemBlue : keyColor
+        popup.backgroundColor = highlighted ? .systemBlue : (isDark ? UIColor(white: 0.5, alpha: 1) : .white)
         popup.layer.shadowPath = UIBezierPath(roundedRect: popup.bounds, cornerRadius: 10).cgPath
         popupLabel.frame = popup.bounds
         popupLabel.textColor = highlighted ? .white : textColor
@@ -535,7 +556,7 @@ final class KeyboardViewController: UIInputViewController {
             k.isPressed = true
             armed.insert(t)
             scheduleHold(t) { [weak self] in self?.beginCursorMode(t) }
-        case "RET":
+        case "RET", "TOGGLE":
             k.isPressed = true
             armed.insert(t)
         default:
@@ -566,7 +587,7 @@ final class KeyboardViewController: UIInputViewController {
         switch k.id {
         case "SHIFT", "SYM1", "SYM2", "ABC", "NEXT", "DEL":
             armed.remove(t)
-        case "SPACE", "RET":
+        case "SPACE", "RET", "TOGGLE":
             k.isPressed = true
             armed.insert(t)
         default:
@@ -593,7 +614,10 @@ final class KeyboardViewController: UIInputViewController {
         if t === altTouch {
             altTouch = nil
             hidePopup()
-            if !cancelled, let s = altText { typeCommitted(s) }
+            if !cancelled, let s = altText {
+                toggleNotice = nil
+                typeCommitted(s)
+            }
             altText = nil
             if let k = touchKeys[t] { unpress(k) }
             return
@@ -629,6 +653,7 @@ final class KeyboardViewController: UIInputViewController {
         UIView.animate(withDuration: 0.15) {
             for k in self.rows.joined() {
                 k.label.alpha = 0
+                k.subLabel.alpha = 0
                 k.icon.alpha = 0
             }
         }
@@ -648,6 +673,7 @@ final class KeyboardViewController: UIInputViewController {
         UIView.animate(withDuration: 0.15) {
             for k in self.rows.joined() {
                 k.label.alpha = 1
+                k.subLabel.alpha = 1
                 k.icon.alpha = 1
             }
         }
@@ -659,11 +685,18 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: Key actions
 
     private func commit(_ id: String) {
+        if id != "TOGGLE" { toggleNotice = nil }
         switch id {
         case "SPACE":
             spaceTapped()
         case "RET":
+            if returnDisabled { return }
             returnKey()
+        case "TOGGLE":
+            replacementsOn.toggle()
+            lastOriginal = nil
+            lastReplacement = nil
+            toggleNotice = replacementsOn ? "öğ ✓" : "öğ — off"
         case "SHIFT", "DEL", "NEXT", "SYM1", "SYM2", "ABC":
             return
         default:
@@ -681,7 +714,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func afterEdit() {
         updateAutoShift()
-        updateBar()
+        restyleDynamicKeys()
     }
 
     private func shiftTapped() {
@@ -735,6 +768,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func deleteBegan() {
+        toggleNotice = nil
         deleteOnce()
         afterEdit()
         deleteCount = 0
@@ -760,20 +794,6 @@ final class KeyboardViewController: UIInputViewController {
     private func deleteEnded() {
         deleteTimer?.invalidate()
         deleteTimer = nil
-    }
-
-    @objc private func toggleTapped() {
-        replacementsOn.toggle()
-        lastOriginal = nil
-        lastReplacement = nil
-        clickFeedback()
-        updateBar()
-    }
-
-    @objc private func hintTapped() {
-        clickFeedback()
-        undoReplacement()
-        afterEdit()
     }
 
     private func updateAutoShift() {
