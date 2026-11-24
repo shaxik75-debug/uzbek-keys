@@ -1,0 +1,10 @@
+- Yangi qisqartma: rr + probel → Rahmat
+  Новое сокращение: rr + пробел → Rahmat
+- «Yangiliklar» bölimi: har bir yangilanişda nima qöşilgani va tuzatilgani körinadi.
+  Раздел «Что нового»: после каждого обновления видно, что добавлено и исправлено.
+- Telefonlarda klaviatura tezroq va silliqroq işlaydi.
+  Клавиатура на телефонах работает быстрее и плавнее.
+- 123 rejimida apostrof bosilsa, klaviatura harflarga qaytadi (Apple kabi).
+  Апостроф из раскладки 123 сразу возвращает к буквам (как у Apple).
+- Yöriqnoma va muallif qöşildi: by işax.
+  Добавлены инструкция и автор: by işax.
