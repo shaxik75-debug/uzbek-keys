@@ -7,6 +7,7 @@ on:
       - 'android/**'
       - '.github/workflows/android.yml'
       - 'tools/make_icon.py'
+      - 'whatsnew.txt'
   workflow_dispatch:
 
 permissions:
@@ -40,6 +41,11 @@ jobs:
           pip install pillow
           python tools/make_icon.py android android/app/src/main/res
 
+      - name: Bundle "what's new"
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp whatsnew.txt android/app/src/main/assets/whatsnew.txt
+
       - name: Signing key
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE }}
@@ -56,16 +62,22 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk UzbekKeys.apk
           echo "${{ github.run_number }}" > version.txt
+          {
+            echo "Android keyboard: install UzbekKeys.apk on the phone. Build ${{ github.run_number }}."
+            echo
+            echo "Yangiliklar / Что нового:"
+            echo
+            cat whatsnew.txt
+          } > release-notes.md
 
       - name: Publish to release "android"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android
           name: Uzbek Keys for Android
-          body: |
-            Android keyboard: install UzbekKeys.apk on the phone.
-            Build ${{ github.run_number }}.
+          body_path: release-notes.md
           make_latest: 'false'
           files: |
             UzbekKeys.apk
             version.txt
+            whatsnew.txt
