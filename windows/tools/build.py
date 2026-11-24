@@ -4,7 +4,9 @@ Copies an AutoHotkey v1.1 base file, embeds the script as the ">AUTOHOTKEY SCRIP
 (exactly what Ahk2Exe does) and replaces the main icon (group 159) with our .ico.
 
   python windows/tools/build.py --ahk <AutoHotkey folder> --script windows/uzbek_auto.ahk
-                                --icon uzbek.ico --version 1.5 --out uzbek_auto.exe
+                                --icon uzbek.ico --version 1.5 --whatsnew whatsnew.txt --out uzbek_auto.exe
+
+--whatsnew puts the text of that file in place of the line "@@WHATSNEW@@" in the script.
 """
 import argparse
 import ctypes
@@ -77,6 +79,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--icon")
     ap.add_argument("--version")
+    ap.add_argument("--whatsnew")
     args = ap.parse_args()
 
     base = find_base(args.ahk)
@@ -86,6 +89,14 @@ def main():
     if args.version:
         text, n = re.subn(r'^AppVersion := ".*"$', 'AppVersion := "%s"' % args.version, text, flags=re.M)
         print("version set to", args.version, "(%d line)" % n)
+    if args.whatsnew:
+        notes = open(args.whatsnew, "r", encoding="utf-8-sig").read().strip()
+        # Inside an AutoHotkey continuation section: escape ° and %, and keep ")" off the start of a line.
+        tick = chr(96)
+        notes = notes.replace(tick, tick + tick).replace("%", tick + "%")
+        notes = "\n".join((" " + l if l.lstrip().startswith(")") else l) for l in notes.splitlines())
+        text, n = re.subn(r"^@@WHATSNEW@@$", lambda m: notes, text, flags=re.M)
+        print("what's new inserted (%d place)" % n)
     # UTF-8 with BOM: AutoHotkey reads the embedded script as UTF-8 (checked by selftest.ahk).
     body = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8-sig")
 
