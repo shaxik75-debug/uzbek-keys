@@ -91,10 +91,11 @@ def main():
         print("version set to", args.version, "(%d line)" % n)
     if args.whatsnew:
         notes = open(args.whatsnew, "r", encoding="utf-8-sig").read().strip()
-        # Inside an AutoHotkey continuation section: escape ° and %, and keep ")" off the start of a line.
+        # Inside an AutoHotkey continuation section: escape backticks and %; a line may not start
+        # with ")" (that would end the section), so such a ")" becomes a full-width one.
         tick = chr(96)
         notes = notes.replace(tick, tick + tick).replace("%", tick + "%")
-        notes = "\n".join((" " + l if l.lstrip().startswith(")") else l) for l in notes.splitlines())
+        notes = "\n".join(re.sub(r"^(\s*)\)", "\\1\uff09", l) for l in notes.splitlines())
         text, n = re.subn(r"^@@WHATSNEW@@$", lambda m: notes, text, flags=re.M)
         print("what's new inserted (%d place)" % n)
     # UTF-8 with BOM: AutoHotkey reads the embedded script as UTF-8 (checked by selftest.ahk).
