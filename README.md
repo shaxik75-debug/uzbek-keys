@@ -10,6 +10,7 @@
 | `o'` → **ö** | `g'` → **ğ** |
 | `sh` → **ş** | `ch` → **ç** |
 | `aa` + probel → **Assalomu Alaykum** | `vv` + probel → **Va Alaykum Assalom** |
+| `rr` + probel → **Rahmat** | |
 
 ## Yuklab oliş / Скачать
 
@@ -24,6 +25,7 @@
 3. Windows: **Scroll Lock** yoki **Ctrl+Alt+U** — öçiriş / yoqiş. Telefonda — **öğ** tugmasi.
 4. Telefonda: o, g, s, c ni bosib turing — ö, ğ, ş, ç. Ikki marta probel — nuqta. Probelni bosib turib suring — kursor.
 5. Yangilanişlar özi örnatiladi (Windows va Android).
+6. Har bir yangilanişda nima qöşilgani va tuzatilgani — **«Yangiliklar / Что нового»** bölimida (ilovada va Windows trey menyusida).
 
 ## Как пользоваться
 
@@ -32,6 +34,7 @@
 3. Windows: **Scroll Lock** или **Ctrl+Alt+U** — выключить / включить. На телефоне — кнопка **öğ**.
 4. На телефоне: удерживайте o, g, s, c — ö, ğ, ş, ç. Два пробела — точка. Удерживайте пробел и ведите пальцем — курсор.
 5. Обновления ставятся сами (Windows и Android).
+6. Что добавлено и исправлено в каждом обновлении — в разделе **«Yangiliklar / Что нового»** (в приложении и в меню значка Windows).
 
 ### Windows
 Faylni Hujjatlar papkasiga qöying va işga tuşiring. Trey menyusida: yöriqnoma, yangilaniş, Windows bilan birga işga tuşiş.
