@@ -86,7 +86,8 @@ def main():
     if args.version:
         text, n = re.subn(r'^AppVersion := ".*"$', 'AppVersion := "%s"' % args.version, text, flags=re.M)
         print("version set to", args.version, "(%d line)" % n)
-    body = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii")
+    # UTF-8 with BOM: AutoHotkey reads the embedded script as UTF-8 (checked by selftest.ahk).
+    body = text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8-sig")
 
     shutil.copyfile(base, args.out)
     k = kernel32()
