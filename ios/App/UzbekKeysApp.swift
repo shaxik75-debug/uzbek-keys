@@ -20,7 +20,7 @@ struct ContentView: View {
                     Text("o' → ö    g' → ğ\nsh → ş    ch → ç")
                         .font(.title3)
                     Text("aa → Assalomu Alaykum\nvv → Va Alaykum Assalom")
-                    Text("«öğ» tugmasi — yoqish/o'chirish.\n⌫ darhol bosilsa — almashtirish bekor bo'ladi.\n\nКнопка «öğ» — включить/выключить замену.\n⌫ сразу после замены — вернуть как было.")
+                    Text("Yuqoridagi «öğ» — yoqish/o'chirish.\n⌫ darhol bosilsa — almashtirish bekor bo'ladi.\no, g, s, c ni bosib turing — ö, ğ, ş, ç.\nIkki marta probel — nuqta.\nProbelni bosib turib suring — kursor.\n\nКнопка «öğ» вверху — включить/выключить замену.\n⌫ сразу после замены — вернуть как было.\nУдерживайте o, g, s, c — ö, ğ, ş, ç.\nДва пробела — точка.\nУдерживайте пробел и ведите пальцем — курсор.\n\nЗвук и вибрация: включите «Полный доступ» для Uzbek Keys в настройках клавиатур. Клавиатура не выходит в интернет и никуда не отправляет текст.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
