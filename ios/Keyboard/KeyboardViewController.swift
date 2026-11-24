@@ -1,290 +1,802 @@
 import UIKit
+import AudioToolbox
 
-/// Uzbek Keys keyboard for iPhone.
+/// Uzbek Keys keyboard for iPhone, laid out and behaving like the Apple keyboard.
 /// While typing: o' -> ö, g' -> ğ, sh -> ş, ch -> ç (capitals too),
 /// aa -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom" (whole word, after space/punctuation/return).
-/// Backspace right after a replacement brings back what was typed. "öğ" key switches replacements on/off.
+/// Backspace (or the hint in the top bar) right after a replacement brings back what was typed.
+/// The "öğ" switch in the top bar turns replacements on/off.
+/// Apple-like behaviour: key popups, fast typing with several fingers, long-press o/g/s/c for ö/ğ/ş/ç,
+/// double space = ". ", hold space and slide to move the cursor, hold 123 and slide to a symbol.
+
+// MARK: - Views
+
+/// One key, drawn like an Apple keyboard key. Touches are handled by TouchView.
+final class KeyView: UIView {
+    let id: String
+    let label = UILabel()
+    let icon = UIImageView()
+    var baseColor: UIColor = .white { didSet { applyColor() } }
+    var pressedColor: UIColor = .lightGray { didSet { applyColor() } }
+    var isPressed = false { didSet { applyColor() } }
+
+    init(id: String) {
+        self.id = id
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        layer.cornerRadius = 8
+        layer.shadowOffset = CGSize(width: 0, height: 1)
+        layer.shadowRadius = 0
+        layer.shadowOpacity = 1
+        label.textAlignment = .center
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.5
+        label.baselineAdjustment = .alignCenters
+        icon.contentMode = .center
+        addSubview(label)
+        addSubview(icon)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private func applyColor() {
+        backgroundColor = isPressed ? pressedColor : baseColor
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        label.frame = bounds.insetBy(dx: 2, dy: 0)
+        icon.frame = bounds
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: layer.cornerRadius).cgPath
+    }
+}
+
+/// Receives every touch of the key area (multi-touch); the keys themselves ignore touches.
+final class TouchView: UIView {
+    var onBegan: ((UITouch, UIEvent?) -> Void)?
+    var onMoved: ((UITouch, UIEvent?) -> Void)?
+    var onEnded: ((UITouch, UIEvent?, Bool) -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches { onBegan?(t, event) }
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches { onMoved?(t, event) }
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches { onEnded?(t, event, false) }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches { onEnded?(t, event, true) }
+    }
+}
+
+// MARK: - Keyboard
+
 final class KeyboardViewController: UIInputViewController {
 
     private enum Mode { case letters, symbols, symbols2 }
 
-    private let letters: [[String]] = [
+    // Special key ids are words; every other id is the character the key types.
+    private let lettersRows: [[String]] = [
         ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
         ["a", "s", "d", "f", "g", "h", "j", "k", "l", "'"],
         ["SHIFT", "z", "x", "c", "v", "b", "n", "m", "DEL"],
-        ["123", "NEXT", "TOGGLE", "SPACE", ".", "RETURN"]
+        ["SYM1", "NEXT", "SPACE", "RET"]
     ]
-    private let symbols: [[String]] = [
+    private let symbolsRows: [[String]] = [
         ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-        ["-", "/", ":", ";", "(", ")", "\"", "@", "&", "?"],
-        ["MORE", "_", ",", "!", "'", "%", "+", "*", "DEL"],
-        ["ABC", "NEXT", "TOGGLE", "SPACE", ".", "RETURN"]
+        ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""],
+        ["SYM2", ".", ",", "?", "!", "'", "DEL"],
+        ["ABC", "NEXT", "SPACE", "RET"]
     ]
-    private let symbols2: [[String]] = [
-        ["[", "]", "{", "}", "#", "^", "=", "<", ">", "~"],
-        ["\\", "|", "$", "€", "£", "₽", "•", "№", "°", "…"],
-        ["123", "«", "»", "‘", "’", "ʻ", "×", "÷", "DEL"],
-        ["ABC", "NEXT", "TOGGLE", "SPACE", ".", "RETURN"]
+    private let symbols2Rows: [[String]] = [
+        ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+        ["_", "\\", "|", "~", "<", ">", "€", "£", "₽", "•"],
+        ["SYM1", ".", ",", "?", "!", "'", "DEL"],
+        ["ABC", "NEXT", "SPACE", "RET"]
     ]
+    private let alternates: [String: String] = ["o": "ö", "g": "ğ", "s": "ş", "c": "ç"]
+
+    // MARK: State
 
     private var mode: Mode = .letters
-    private var shift = 0              // 0 off, 1 next letter, 2 caps lock
+    private var shift = 0                       // 0 off, 1 next letter, 2 caps lock
     private var lastShiftTap = Date.distantPast
+    private var lastSpaceTap = Date.distantPast
     private var lastOriginal: String?
     private var lastReplacement: String?
-
-    private let stack = UIStackView()
-    private var letterButtons: [(UIButton, String)] = []
-    private weak var shiftButton: UIButton?
-    private weak var toggleButton: UIButton?
-    private var deleteTimer: Timer?
 
     private var replacementsOn: Bool {
         get { UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "enabled") }
     }
 
-    private let keyColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.42, alpha: 1) : .white }
-    private let specialColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.27, alpha: 1) : UIColor(white: 0.68, alpha: 1) }
-    private let onColor = UIColor(red: 0.18, green: 0.49, blue: 0.20, alpha: 1)
+    // MARK: Views
 
-    // MARK: - Lifecycle
+    private let bar = UIView()
+    private let toggleButton = UIButton(type: .custom)
+    private let hintButton = UIButton(type: .custom)
+    private let keysView = TouchView()
+    private let popup = UIView()
+    private let popupLabel = UILabel()
+    private weak var popupKey: KeyView?
+    private var rows: [[KeyView]] = []
+    private var heightConstraint: NSLayoutConstraint?
+    private let haptic = UIImpactFeedbackGenerator(style: .light)
+
+    // Grid metrics, kept for hit testing.
+    private var gridTop: CGFloat = 8
+    private var gridKeyH: CGFloat = 42
+    private var gridGap: CGFloat = 12
+
+    // MARK: Touch tracking
+
+    private var touchKeys: [UITouch: KeyView] = [:]
+    private var armed: Set<UITouch> = []        // touches that type their key when released
+    private var modeTouch: UITouch?
+    private var altTouch: UITouch?
+    private var altText: String?
+    private var cursorTouch: UITouch?
+    private var cursorX: CGFloat = 0
+    private var holdTimer: Timer?
+    private var holdTouch: UITouch?
+    private var deleteTimer: Timer?
+    private var deleteCount = 0
+
+    // MARK: Appearance
+
+    private var isDark: Bool {
+        textDocumentProxy.keyboardAppearance == .dark || traitCollection.userInterfaceStyle == .dark
+    }
+    private var isLandscape: Bool {
+        let s = UIScreen.main.bounds.size
+        return s.width > s.height
+    }
+    private var keyColor: UIColor { isDark ? UIColor(white: 0.42, alpha: 1) : .white }
+    private var specialColor: UIColor {
+        isDark ? UIColor(white: 0.27, alpha: 1) : UIColor(red: 0.67, green: 0.69, blue: 0.73, alpha: 1)
+    }
+    private var textColor: UIColor { isDark ? .white : .black }
+    private var shadowColor: UIColor { UIColor(white: 0, alpha: isDark ? 0.45 : 0.3) }
+
+    // MARK: Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        stack.axis = .vertical
-        stack.distribution = .fillEqually
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -2),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -2)
-        ])
-        let height = view.heightAnchor.constraint(equalToConstant: 232)
-        height.priority = UILayoutPriority(999)
-        height.isActive = true
-        build()
+        view.backgroundColor = .clear
+
+        keysView.isMultipleTouchEnabled = true
+        keysView.backgroundColor = .clear
+        keysView.onBegan = { [weak self] t, e in self?.touchBegan(t, e) }
+        keysView.onMoved = { [weak self] t, e in self?.touchMoved(t, e) }
+        keysView.onEnded = { [weak self] t, e, c in self?.touchEnded(t, e, cancelled: c) }
+        view.addSubview(keysView)
+
+        toggleButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        toggleButton.layer.cornerRadius = 15
+        toggleButton.addTarget(self, action: #selector(toggleTapped), for: .touchUpInside)
+        bar.addSubview(toggleButton)
+        hintButton.titleLabel?.font = .systemFont(ofSize: 16)
+        hintButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        hintButton.titleLabel?.minimumScaleFactor = 0.6
+        hintButton.addTarget(self, action: #selector(hintTapped), for: .touchUpInside)
+        bar.addSubview(hintButton)
+        view.addSubview(bar)
+
+        popup.isUserInteractionEnabled = false
+        popup.isHidden = true
+        popup.layer.cornerRadius = 10
+        popup.layer.shadowColor = UIColor.black.cgColor
+        popup.layer.shadowOffset = CGSize(width: 0, height: 1)
+        popup.layer.shadowRadius = 3
+        popup.layer.shadowOpacity = 0.3
+        popupLabel.textAlignment = .center
+        popupLabel.font = .systemFont(ofSize: 34, weight: .light)
+        popup.addSubview(popupLabel)
+        view.addSubview(popup)
+
+        let h = view.heightAnchor.constraint(equalToConstant: isLandscape ? 198 : 260)
+        h.priority = UILayoutPriority(999)
+        h.isActive = true
+        heightConstraint = h
+
+        buildKeys()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         lastOriginal = nil
         lastReplacement = nil
+        if shift == 2 { shift = 0 }
+        mode = .letters
+        buildKeys()
         updateAutoShift()
-        refresh()
+        if hasFullAccess { haptic.prepare() }
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        heightConstraint?.constant = isLandscape ? 198 : 260
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutAll()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        restyleKeys()
         updateAutoShift()
     }
 
-    // MARK: - Layout
-
-    private func weight(_ k: String) -> CGFloat {
-        switch k {
-        case "SPACE": return 4
-        case "SHIFT", "DEL", "RETURN", "123", "ABC", "MORE": return 1.5
-        default: return 1
-        }
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        restyleKeys()
     }
 
-    private func build() {
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        letterButtons.removeAll()
-        let rows: [[String]]
+    // MARK: Building and layout
+
+    private func currentRows() -> [[String]] {
+        var rs: [[String]]
         switch mode {
-        case .letters: rows = letters
-        case .symbols: rows = symbols
-        case .symbols2: rows = symbols2
+        case .letters: rs = lettersRows
+        case .symbols: rs = symbolsRows
+        case .symbols2: rs = symbols2Rows
         }
-        for row in rows {
-            let r = UIStackView()
-            r.axis = .horizontal
-            r.distribution = .fill
-            r.spacing = 0
-            stack.addArrangedSubview(r)
-            let total = row.reduce(CGFloat(0)) { $0 + weight($1) }
-            for k in row {
-                let cell = makeKey(k)
-                r.addArrangedSubview(cell)
-                let c = cell.widthAnchor.constraint(equalTo: r.widthAnchor, multiplier: weight(k) / total)
-                c.priority = UILayoutPriority(999)
-                c.isActive = true
+        if !needsInputModeSwitchKey {
+            rs[3] = rs[3].filter { $0 != "NEXT" }
+        }
+        return rs
+    }
+
+    private func buildKeys() {
+        hidePopup()
+        for k in rows.joined() { k.removeFromSuperview() }
+        rows = currentRows().map { ids in
+            ids.map { id -> KeyView in
+                let k = KeyView(id: id)
+                keysView.addSubview(k)
+                return k
             }
         }
-        refresh()
+        restyleKeys()
+        layoutAll()
     }
 
-    private func title(for k: String) -> String {
-        switch k {
-        case "SHIFT": return shift == 2 ? "⇪" : "⇧"
-        case "DEL": return "⌫"
-        case "RETURN": return "⏎"
-        case "SPACE": return "O'zbek"
-        case "NEXT": return "🌐"
-        case "TOGGLE": return replacementsOn ? "öğ" : "off"
-        case "MORE": return "#+="
-        default: return k
-        }
-    }
+    private func layoutAll() {
+        let W = view.bounds.width
+        let H = view.bounds.height
+        guard W > 0, H > 0 else { return }
+        let land = isLandscape
+        let barH: CGFloat = land ? 36 : 44
+        bar.frame = CGRect(x: 0, y: 0, width: W, height: barH)
+        toggleButton.frame = CGRect(x: 8, y: (barH - 30) / 2, width: 74, height: 30)
+        hintButton.frame = CGRect(x: 92, y: 0, width: max(0, W - 184), height: barH)
+        keysView.frame = CGRect(x: 0, y: barH, width: W, height: H - barH)
 
-    private func makeKey(_ k: String) -> UIView {
-        let cell = UIView()
-        let b = UIButton(type: .custom)
-        b.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(b)
-        NSLayoutConstraint.activate([
-            b.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 3),
-            b.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -3),
-            b.topAnchor.constraint(equalTo: cell.topAnchor, constant: 5),
-            b.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -5)
-        ])
-        let isChar = k.count == 1
-        b.layer.cornerRadius = 5
-        b.layer.shadowColor = UIColor.black.cgColor
-        b.layer.shadowOpacity = 0.25
-        b.layer.shadowOffset = CGSize(width: 0, height: 1)
-        b.layer.shadowRadius = 0
-        b.setTitleColor(.label, for: .normal)
-        b.titleLabel?.font = .systemFont(ofSize: isChar ? 22 : 17)
-        b.backgroundColor = (isChar || k == "SPACE") ? keyColor : specialColor
-        b.setTitle(title(for: k), for: .normal)
-        b.accessibilityIdentifier = k
+        let side: CGFloat = 3
+        let gapX: CGFloat = 6
+        let topPad: CGFloat = land ? 5 : 8
+        let bottomPad: CGFloat = land ? 3 : 4
+        let rowGap: CGFloat = land ? 7 : 12
+        let keyH = max(20, (keysView.bounds.height - topPad - bottomPad - 3 * rowGap) / 4)
+        let unit = (W - 2 * side - 9 * gapX) / 10
+        gridTop = topPad
+        gridKeyH = keyH
+        gridGap = rowGap
 
-        switch k {
-        case "NEXT":
-            b.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
-        case "DEL":
-            b.addTarget(self, action: #selector(deleteDown), for: .touchDown)
-            b.addTarget(self, action: #selector(deleteUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
-        default:
-            b.addTarget(self, action: #selector(keyTapped(_:)), for: .touchUpInside)
-        }
-        b.addTarget(self, action: #selector(pressDown(_:)), for: .touchDown)
-        b.addTarget(self, action: #selector(pressUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel])
-
-        if isChar, let ch = k.first, ch.isLetter { letterButtons.append((b, k)) }
-        if k == "SHIFT" { shiftButton = b }
-        if k == "TOGGLE" { toggleButton = b }
-        return cell
-    }
-
-    private func refresh() {
-        let upper = shift > 0
-        for (b, k) in letterButtons {
-            b.setTitle(upper ? k.uppercased() : k, for: .normal)
-        }
-        if let s = shiftButton {
-            s.setTitle(title(for: "SHIFT"), for: .normal)
-            s.backgroundColor = shift > 0 ? keyColor : specialColor
-        }
-        if let t = toggleButton {
-            t.setTitle(title(for: "TOGGLE"), for: .normal)
-            t.backgroundColor = replacementsOn ? onColor : specialColor
-            t.setTitleColor(replacementsOn ? .white : .label, for: .normal)
-        }
-    }
-
-    // MARK: - Key handling
-
-    @objc private func pressDown(_ sender: UIButton) {
-        sender.alpha = 0.5
-        UIDevice.current.playInputClick()
-    }
-
-    @objc private func pressUp(_ sender: UIButton) {
-        sender.alpha = 1
-    }
-
-    @objc private func keyTapped(_ sender: UIButton) {
-        guard let k = sender.accessibilityIdentifier else { return }
-        switch k {
-        case "SHIFT":
-            let now = Date()
-            if shift == 2 {
-                shift = 0
-            } else if shift == 1 && now.timeIntervalSince(lastShiftTap) < 0.4 {
-                shift = 2
+        for (r, row) in rows.enumerated() {
+            let y = topPad + CGFloat(r) * (keyH + rowGap)
+            var frames: [CGRect] = []
+            func add(_ x: CGFloat, _ w: CGFloat) {
+                frames.append(CGRect(x: x, y: y, width: w, height: keyH))
+            }
+            if r < 2 {
+                let n = CGFloat(row.count)
+                var x = (W - (n * unit + (n - 1) * gapX)) / 2
+                for _ in row { add(x, unit); x += unit + gapX }
+            } else if r == 2 {
+                let wide = unit * 1.3 + 2
+                let n = row.count - 2
+                add(side, wide)
+                if mode == .letters {
+                    var x = (W - (CGFloat(n) * unit + CGFloat(n - 1) * gapX)) / 2
+                    for _ in 0..<n { add(x, unit); x += unit + gapX }
+                } else {
+                    let inner = W - 2 * side - 2 * wide - 4 * gapX
+                    let w = (inner - CGFloat(n - 1) * gapX) / CGFloat(n)
+                    var x = side + wide + 2 * gapX
+                    for _ in 0..<n { add(x, w); x += w + gapX }
+                }
+                add(W - side - wide, wide)
             } else {
-                shift = shift == 0 ? 1 : 0
+                let fixed: [CGFloat] = row.map { k in
+                    switch k.id {
+                    case "SPACE": return 0
+                    case "RET": return unit * 2.7 + gapX
+                    default: return unit * 1.3 + 2
+                    }
+                }
+                let used = fixed.reduce(0, +) + CGFloat(row.count - 1) * gapX
+                let spaceW = max(unit, W - 2 * side - used)
+                var x = side
+                for (i, k) in row.enumerated() {
+                    let w = k.id == "SPACE" ? spaceW : fixed[i]
+                    add(x, w)
+                    x += w + gapX
+                }
             }
-            lastShiftTap = now
-            refresh()
+            for (i, k) in row.enumerated() where i < frames.count {
+                k.frame = frames[i]
+            }
+        }
+    }
+
+    private func key(at p: CGPoint) -> KeyView? {
+        guard !rows.isEmpty else { return nil }
+        var r = Int(floor((p.y - gridTop + gridGap / 2) / (gridKeyH + gridGap)))
+        r = min(max(r, 0), rows.count - 1)
+        var best: KeyView?
+        var bestD = CGFloat.greatestFiniteMagnitude
+        for k in rows[r] {
+            let f = k.frame
+            let d = p.x < f.minX ? f.minX - p.x : (p.x > f.maxX ? p.x - f.maxX : 0)
+            if d < bestD {
+                bestD = d
+                best = k
+            }
+        }
+        return best
+    }
+
+    // MARK: Styling
+
+    private func symbol(_ name: String, size: CGFloat = 20) -> UIImage? {
+        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: size, weight: .regular))
+    }
+
+    private func isCharacter(_ id: String) -> Bool { id.count == 1 }
+
+    private func restyleKeys() {
+        for k in rows.joined() { style(k) }
+        updateBar()
+    }
+
+    private func style(_ k: KeyView) {
+        let id = k.id
+        let special = !isCharacter(id) && id != "SPACE"
+        k.layer.shadowColor = shadowColor.cgColor
+        k.label.textColor = textColor
+        k.icon.tintColor = textColor
+        k.label.text = nil
+        k.icon.image = nil
+        k.baseColor = special ? specialColor : keyColor
+        k.pressedColor = special ? keyColor : specialColor
+        switch id {
+        case "SHIFT":
+            k.icon.image = symbol(shift == 2 ? "capslock.fill" : (shift == 1 ? "shift.fill" : "shift"))
+            if shift > 0 { k.baseColor = keyColor }
+        case "DEL":
+            k.icon.image = symbol("delete.left", size: 21)
+        case "NEXT":
+            k.icon.image = symbol("globe")
+        case "SPACE":
+            k.label.text = "Özbek"
+            k.label.font = .systemFont(ofSize: 16)
+        case "RET":
+            styleReturn(k)
+        case "SYM1", "SYM2", "ABC":
+            k.label.text = id == "SYM1" ? "123" : (id == "SYM2" ? "#+=" : "ABC")
+            k.label.font = .systemFont(ofSize: 16)
+        default:
+            let upper = mode == .letters && shift > 0
+            k.label.text = upper ? id.uppercased() : id
+            k.label.font = .systemFont(ofSize: mode == .letters ? 25 : 23, weight: .light)
+        }
+    }
+
+    private func styleReturn(_ k: KeyView) {
+        var title: String?
+        var blue = true
+        switch textDocumentProxy.returnKeyType ?? .default {
+        case .go: title = "go"
+        case .google, .search, .yahoo: title = "search"
+        case .join: title = "join"
+        case .next: title = "next"; blue = false
+        case .route: title = "route"
+        case .send: title = "send"
+        case .done: title = "done"
+        case .emergencyCall: title = "emergency"
+        case .continue: title = "continue"; blue = false
+        default: title = nil; blue = false
+        }
+        if let t = title {
+            k.label.text = t
+            k.label.font = .systemFont(ofSize: 16)
+        } else {
+            k.icon.image = symbol("return.left")
+        }
+        if blue {
+            k.baseColor = .systemBlue
+            k.pressedColor = keyColor
+            k.label.textColor = .white
+            k.icon.tintColor = .white
+        }
+    }
+
+    private func updateBar() {
+        let on = replacementsOn
+        toggleButton.setTitle(on ? "öğ ✓" : "öğ off", for: .normal)
+        toggleButton.backgroundColor = on ? UIColor(red: 0.20, green: 0.66, blue: 0.33, alpha: 1) : specialColor
+        toggleButton.setTitleColor(on ? .white : textColor, for: .normal)
+        if let r = lastReplacement, let o = lastOriginal {
+            let from = o.trimmingCharacters(in: .whitespacesAndNewlines)
+            let to = r.trimmingCharacters(in: .whitespacesAndNewlines)
+            hintButton.setTitle("\(from) → \(to)   ↶", for: .normal)
+            hintButton.setTitleColor(textColor, for: .normal)
+            hintButton.isHidden = false
+        } else {
+            hintButton.isHidden = true
+        }
+    }
+
+    // MARK: Popups
+
+    private func showPopup(over k: KeyView, text: String, highlighted: Bool) {
+        let f = keysView.convert(k.frame, to: view)
+        let w = f.width + 20
+        let h = f.height + 14
+        let x = min(max(f.midX - w / 2, 2), view.bounds.width - w - 2)
+        let y = max(f.minY - h + 6, 0)
+        popup.frame = CGRect(x: x, y: y, width: w, height: h)
+        popup.backgroundColor = highlighted ? .systemBlue : keyColor
+        popup.layer.shadowPath = UIBezierPath(roundedRect: popup.bounds, cornerRadius: 10).cgPath
+        popupLabel.frame = popup.bounds
+        popupLabel.textColor = highlighted ? .white : textColor
+        popupLabel.text = text
+        popup.isHidden = false
+        popupKey = k
+    }
+
+    private func hidePopup() {
+        popup.isHidden = true
+        popupKey = nil
+    }
+
+    private func press(_ k: KeyView) {
+        if isCharacter(k.id) {
+            showPopup(over: k, text: k.label.text ?? k.id, highlighted: false)
+        } else {
+            k.isPressed = true
+        }
+    }
+
+    private func unpress(_ k: KeyView) {
+        k.isPressed = false
+        if popupKey === k { hidePopup() }
+    }
+
+    private func clickFeedback() {
+        guard hasFullAccess else { return }
+        AudioServicesPlaySystemSound(1104)
+        haptic.impactOccurred()
+        haptic.prepare()
+    }
+
+    // MARK: Touches
+
+    private func scheduleHold(_ t: UITouch, _ action: @escaping () -> Void) {
+        holdTimer?.invalidate()
+        holdTouch = t
+        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+            self?.holdTimer = nil
+            self?.holdTouch = nil
+            action()
+        }
+    }
+
+    private func cancelHold() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        holdTouch = nil
+    }
+
+    private func touchBegan(_ t: UITouch, _ e: UIEvent?) {
+        if cursorTouch != nil || altTouch != nil { return }
+        // Fast typing: a new finger types what the other fingers are still holding, like the Apple keyboard.
+        for (other, ok) in touchKeys where other !== t && armed.contains(other) {
+            armed.remove(other)
+            commit(ok.id)
+            unpress(ok)
+        }
+        cancelHold()
+        guard let k = key(at: t.location(in: keysView)) else { return }
+        touchKeys[t] = k
+        clickFeedback()
+        switch k.id {
+        case "DEL":
+            k.isPressed = true
+            deleteBegan()
+        case "SHIFT":
+            shiftTapped()
+        case "SYM1", "SYM2", "ABC":
+            switchMode(k.id)
+            modeTouch = t
+            if let nk = key(at: t.location(in: keysView)) {
+                touchKeys[t] = nk
+                nk.isPressed = true
+            }
+        case "NEXT":
+            k.isPressed = true
+            if let e = e { handleInputModeList(from: keysView, with: e) }
+        case "SPACE":
+            k.isPressed = true
+            armed.insert(t)
+            scheduleHold(t) { [weak self] in self?.beginCursorMode(t) }
+        case "RET":
+            k.isPressed = true
+            armed.insert(t)
+        default:
+            press(k)
+            armed.insert(t)
+            if alternates[k.id] != nil {
+                scheduleHold(t) { [weak self] in self?.showAlternate(t) }
+            }
+        }
+    }
+
+    private func touchMoved(_ t: UITouch, _ e: UIEvent?) {
+        let p = t.location(in: keysView)
+        if t === cursorTouch {
+            moveCursor(to: p.x)
             return
-        case "123":
-            mode = .symbols
-            build()
+        }
+        guard t !== altTouch, let old = touchKeys[t] else { return }
+        if old.id == "DEL" { return }
+        if old.id == "NEXT" {
+            if let e = e { handleInputModeList(from: keysView, with: e) }
             return
-        case "MORE":
-            mode = .symbols2
-            build()
+        }
+        guard let k = key(at: p), k !== old else { return }
+        if holdTouch === t { cancelHold() }
+        unpress(old)
+        touchKeys[t] = k
+        switch k.id {
+        case "SHIFT", "SYM1", "SYM2", "ABC", "NEXT", "DEL":
+            armed.remove(t)
+        case "SPACE", "RET":
+            k.isPressed = true
+            armed.insert(t)
+        default:
+            press(k)
+            armed.insert(t)
+            if alternates[k.id] != nil {
+                scheduleHold(t) { [weak self] in self?.showAlternate(t) }
+            }
+        }
+    }
+
+    private func touchEnded(_ t: UITouch, _ e: UIEvent?, cancelled: Bool) {
+        if holdTouch === t { cancelHold() }
+        defer {
+            touchKeys[t] = nil
+            armed.remove(t)
+            if modeTouch === t { modeTouch = nil }
+        }
+        if t === cursorTouch {
+            if let k = touchKeys[t] { unpress(k) }
+            endCursorMode()
             return
-        case "ABC":
-            mode = .letters
-            build()
-            updateAutoShift()
+        }
+        if t === altTouch {
+            altTouch = nil
+            hidePopup()
+            if !cancelled, let s = altText { typeCommitted(s) }
+            altText = nil
+            if let k = touchKeys[t] { unpress(k) }
             return
-        case "TOGGLE":
-            replacementsOn.toggle()
+        }
+        guard let k = touchKeys[t] else { return }
+        if k.id == "DEL" { deleteEnded() }
+        if k.id == "NEXT", let e = e { handleInputModeList(from: keysView, with: e) }
+        if !cancelled && armed.contains(t) {
+            commit(k.id)
+            if t === modeTouch && isCharacter(k.id) && mode != .letters {
+                mode = .letters
+                buildKeys()
+                updateAutoShift()
+            }
+        }
+        unpress(k)
+    }
+
+    private func showAlternate(_ t: UITouch) {
+        guard let k = touchKeys[t], let alt = alternates[k.id] else { return }
+        altTouch = t
+        armed.remove(t)
+        let s = (mode == .letters && shift > 0) ? alt.uppercased() : alt
+        altText = s
+        showPopup(over: k, text: s, highlighted: true)
+    }
+
+    private func beginCursorMode(_ t: UITouch) {
+        guard touchKeys[t]?.id == "SPACE" else { return }
+        cursorTouch = t
+        armed.remove(t)
+        cursorX = t.location(in: keysView).x
+        UIView.animate(withDuration: 0.15) {
+            for k in self.rows.joined() {
+                k.label.alpha = 0
+                k.icon.alpha = 0
+            }
+        }
+    }
+
+    private func moveCursor(to x: CGFloat) {
+        let step: CGFloat = 9
+        let n = Int((x - cursorX) / step)
+        if n != 0 {
+            textDocumentProxy.adjustTextPosition(byCharacterOffset: n)
+            cursorX += CGFloat(n) * step
+        }
+    }
+
+    private func endCursorMode() {
+        cursorTouch = nil
+        UIView.animate(withDuration: 0.15) {
+            for k in self.rows.joined() {
+                k.label.alpha = 1
+                k.icon.alpha = 1
+            }
+        }
+        lastOriginal = nil
+        lastReplacement = nil
+        afterEdit()
+    }
+
+    // MARK: Key actions
+
+    private func commit(_ id: String) {
+        switch id {
+        case "SPACE":
+            spaceTapped()
+        case "RET":
+            returnKey()
+        case "SHIFT", "DEL", "NEXT", "SYM1", "SYM2", "ABC":
+            return
+        default:
+            typeCommitted((mode == .letters && shift > 0) ? id.uppercased() : id)
+            return
+        }
+        afterEdit()
+    }
+
+    private func typeCommitted(_ s: String) {
+        type(s)
+        if mode == .letters && shift == 1 { setShift(0) }
+        afterEdit()
+    }
+
+    private func afterEdit() {
+        updateAutoShift()
+        updateBar()
+    }
+
+    private func shiftTapped() {
+        let now = Date()
+        let v: Int
+        if now.timeIntervalSince(lastShiftTap) < 0.35 && shift != 2 {
+            v = 2
+        } else if shift == 2 {
+            v = 0
+        } else {
+            v = shift == 0 ? 1 : 0
+        }
+        lastShiftTap = now
+        setShift(v)
+    }
+
+    private func setShift(_ v: Int) {
+        guard v != shift else { return }
+        shift = v
+        restyleKeys()
+    }
+
+    private func switchMode(_ id: String) {
+        switch id {
+        case "SYM1": mode = .symbols
+        case "SYM2": mode = .symbols2
+        default: mode = .letters
+        }
+        buildKeys()
+        if mode == .letters { updateAutoShift() }
+    }
+
+    private func spaceTapped() {
+        let now = Date()
+        let before = textDocumentProxy.documentContextBeforeInput ?? ""
+        if now.timeIntervalSince(lastSpaceTap) < 0.45, before.hasSuffix(" "),
+           let prev = before.dropLast().last, prev.isLetter || prev.isNumber {
+            textDocumentProxy.deleteBackward()
+            textDocumentProxy.insertText(". ")
+            lastSpaceTap = .distantPast
             lastOriginal = nil
             lastReplacement = nil
-            refresh()
-            return
-        case "SPACE":
+        } else {
             type(" ")
-            return
-        case "RETURN":
-            returnKey()
-            return
-        default:
-            break
+            lastSpaceTap = now
         }
-        var s = k
-        if mode == .letters && shift > 0, let ch = k.first, ch.isLetter { s = k.uppercased() }
-        type(s)
-        if mode == .letters && shift == 1 {
-            shift = 0
-            refresh()
+        if mode != .letters {
+            mode = .letters
+            buildKeys()
         }
     }
 
-    @objc private func deleteDown() {
+    private func deleteBegan() {
         deleteOnce()
+        afterEdit()
+        deleteCount = 0
         deleteTimer?.invalidate()
         deleteTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: false) { [weak self] _ in
-            self?.deleteTimer = Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { [weak self] _ in
-                self?.deleteOnce()
+            self?.startDeleteRepeat(0.1)
+        }
+    }
+
+    private func startDeleteRepeat(_ interval: TimeInterval) {
+        deleteTimer?.invalidate()
+        deleteTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.deleteOnce()
+            self.afterEdit()
+            self.deleteCount += 1
+            if self.deleteCount == 15 && interval > 0.05 {
+                self.startDeleteRepeat(0.05)
             }
         }
     }
 
-    @objc private func deleteUp() {
+    private func deleteEnded() {
         deleteTimer?.invalidate()
         deleteTimer = nil
     }
 
-    private func updateAutoShift() {
-        guard shift != 2 else { return }
-        let proxy = textDocumentProxy
-        var caps = false
-        if (proxy.autocapitalizationType ?? .sentences) != UITextAutocapitalizationType.none {
-            let before = proxy.documentContextBeforeInput ?? ""
-            let trimmed = before.trimmingCharacters(in: .whitespaces)
-            caps = before.isEmpty || before.hasSuffix("\n")
-                || (before.hasSuffix(" ") && (trimmed.hasSuffix(".") || trimmed.hasSuffix("!") || trimmed.hasSuffix("?")))
-        }
-        let ns = caps ? 1 : 0
-        if ns != shift {
-            shift = ns
-            refresh()
-        }
+    @objc private func toggleTapped() {
+        replacementsOn.toggle()
+        lastOriginal = nil
+        lastReplacement = nil
+        clickFeedback()
+        updateBar()
     }
 
-    // MARK: - Text
+    @objc private func hintTapped() {
+        clickFeedback()
+        undoReplacement()
+        afterEdit()
+    }
+
+    private func updateAutoShift() {
+        guard shift != 2, mode == .letters else { return }
+        let proxy = textDocumentProxy
+        let kind = proxy.autocapitalizationType ?? .sentences
+        var caps = false
+        if kind != UITextAutocapitalizationType.none {
+            let before = proxy.documentContextBeforeInput ?? ""
+            if kind == .allCharacters {
+                caps = true
+            } else if kind == .words {
+                caps = before.isEmpty || (before.last?.isWhitespace ?? true)
+            } else {
+                let trimmed = before.trimmingCharacters(in: .whitespaces)
+                caps = trimmed.isEmpty || before.hasSuffix("\n")
+                    || (before.hasSuffix(" ") && (trimmed.hasSuffix(".") || trimmed.hasSuffix("!") || trimmed.hasSuffix("?")))
+            }
+        }
+        setShift(caps ? 1 : 0)
+    }
+
+    // MARK: Text
 
     private func isApostrophe(_ c: Character) -> Bool {
         return c == "'" || c == "‘" || c == "’" || c == "ʻ" || c == "ʼ"
@@ -372,19 +884,21 @@ final class KeyboardViewController: UIInputViewController {
         textDocumentProxy.insertText("\n")
     }
 
-    private func deleteOnce() {
-        let proxy = textDocumentProxy
-        if let rep = lastReplacement, let orig = lastOriginal {
-            lastOriginal = nil
-            lastReplacement = nil
-            if (proxy.documentContextBeforeInput ?? "").hasSuffix(rep) {
-                for _ in 0..<rep.count { proxy.deleteBackward() }
-                proxy.insertText(orig)
-                return
-            }
-        }
+    @discardableResult
+    private func undoReplacement() -> Bool {
+        guard let rep = lastReplacement, let orig = lastOriginal else { return false }
         lastOriginal = nil
         lastReplacement = nil
-        proxy.deleteBackward()
+        guard (textDocumentProxy.documentContextBeforeInput ?? "").hasSuffix(rep) else { return false }
+        for _ in 0..<rep.count { textDocumentProxy.deleteBackward() }
+        textDocumentProxy.insertText(orig)
+        return true
+    }
+
+    private func deleteOnce() {
+        if undoReplacement() { return }
+        lastOriginal = nil
+        lastReplacement = nil
+        textDocumentProxy.deleteBackward()
     }
 }
