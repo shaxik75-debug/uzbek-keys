@@ -1,25 +1,29 @@
-// Draws the 1024x1024 app icon (green, four keys: ö ğ ş ç).
+// Draws the 1024x1024 app icon (green, four keys: ö ğ ş ç), opaque PNG without alpha.
 // Usage (macOS): swift ios/tools/make_icon.swift <output.png>
 import AppKit
 import CoreText
+import ImageIO
 
 let size = 1024
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon-1024.png"
 
-guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
-                                 bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
-                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-      let gc = NSGraphicsContext(bitmapImageRep: rep) else {
-    fatalError("cannot create bitmap")
+guard let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+                          space: CGColorSpaceCreateDeviceRGB(),
+                          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+    fatalError("cannot create bitmap context")
 }
 NSGraphicsContext.saveGraphicsState()
-NSGraphicsContext.current = gc
-let ctx = gc.cgContext
+NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
 
 let full = NSRect(x: 0, y: 0, width: size, height: size)
 let top = NSColor(calibratedRed: 0.20, green: 0.66, blue: 0.33, alpha: 1)
 let bottom = NSColor(calibratedRed: 0.10, green: 0.42, blue: 0.20, alpha: 1)
-NSGradient(starting: top, ending: bottom)!.draw(in: full, angle: -90)
+if let gradient = NSGradient(starting: top, ending: bottom) {
+    gradient.draw(in: full, angle: -90)
+} else {
+    top.setFill()
+    full.fill()
+}
 
 let letters = ["ö", "ğ", "ş", "ç"]
 let keyW: CGFloat = 330
@@ -49,6 +53,11 @@ for (i, ch) in letters.enumerated() {
 }
 
 NSGraphicsContext.restoreGraphicsState()
-guard let data = rep.representation(using: .png, properties: [:]) else { fatalError("cannot encode png") }
-try data.write(to: URL(fileURLWithPath: out))
+
+guard let image = ctx.makeImage(),
+      let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, "public.png" as CFString, 1, nil) else {
+    fatalError("cannot encode png")
+}
+CGImageDestinationAddImage(dest, image, nil)
+guard CGImageDestinationFinalize(dest) else { fatalError("cannot write png") }
 print("icon written to \(out)")
