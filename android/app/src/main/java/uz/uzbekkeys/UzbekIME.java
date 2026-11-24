@@ -27,6 +27,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -172,6 +173,9 @@ public class UzbekIME extends InputMethodService {
         lastOriginal = null;
         lastReplacement = null;
         toggleNotice = null;
+        selStart = info.initialSelStart;
+        selEnd = info.initialSelEnd;
+        resetCache(selStart);
         int cls = info.inputType & InputType.TYPE_MASK_CLASS;
         mode = (cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE) ? 1 : 0;
         if (shift == 2) shift = 0;
@@ -201,6 +205,16 @@ public class UzbekIME extends InputMethodService {
     public void onUpdateSelection(int oldSelStart, int oldSelEnd, int newSelStart, int newSelEnd,
                                   int candidatesStart, int candidatesEnd) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd);
+        selStart = newSelStart;
+        selEnd = newSelEnd;
+        if (newSelStart == newSelEnd && pending.contains(newSelStart)) {
+            // The cursor moved because of our own typing: the remembered text is still right.
+            while (!pending.isEmpty() && pending.peekFirst() != newSelStart) pending.pollFirst();
+            pending.pollFirst();
+            return;
+        }
+        // Moved by the user or the app: read the text again next time it is needed.
+        resetCache(newSelStart);
         updateAutoShift();
         invalidateKeys();
     }
@@ -337,6 +351,7 @@ public class UzbekIME extends InputMethodService {
         private final Paint subPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF tmp = new RectF();
+        private final Paint.FontMetrics fm = new Paint.FontMetrics();
 
         KeyboardView(Context c) {
             super(c);
@@ -493,7 +508,7 @@ public class UzbekIME extends InputMethodService {
                 float maxW = k.r.width() - dp(8);
                 float tw = textPaint.measureText(text);
                 if (tw > maxW && tw > 0) textPaint.setTextSize(size * maxW / tw);
-                Paint.FontMetrics fm = textPaint.getFontMetrics();
+                textPaint.getFontMetrics(fm);
                 c.drawText(text, k.r.centerX(), k.r.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
             }
             if (k.id.equals("SPACE")) {
@@ -517,7 +532,7 @@ public class UzbekIME extends InputMethodService {
             textPaint.setTypeface(Typeface.DEFAULT);
             textPaint.setTextSize(sp(34));
             textPaint.setColor(popupHighlight || dark ? Color.WHITE : Color.BLACK);
-            Paint.FontMetrics fm = textPaint.getFontMetrics();
+            textPaint.getFontMetrics(fm);
             c.drawText(popupText, tmp.centerX(), tmp.centerY() - (fm.ascent + fm.descent) / 2f, textPaint);
         }
 
@@ -859,14 +874,13 @@ public class UzbekIME extends InputMethodService {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         long now = System.currentTimeMillis();
-        CharSequence cs = ic.getTextBeforeCursor(3, 0);
-        String b = cs == null ? "" : cs.toString();
-        if (now - lastSpaceTap < 450 && b.endsWith(" ") && b.length() >= 2
-                && Character.isLetterOrDigit(b.charAt(b.length() - 2))) {
+        String b = (now - lastSpaceTap < 450 && !hasSelection()) ? before(ic) : "";
+        if (b.endsWith(" ") && b.length() >= 2 && Character.isLetterOrDigit(b.charAt(b.length() - 2))) {
             ic.beginBatchEdit();
-            ic.deleteSurroundingText(1, 0);
-            ic.commitText(". ", 1);
+            cachedDelete(ic, 1);
+            cachedCommit(ic, ". ");
             ic.endBatchEdit();
+            markPending();
             lastSpaceTap = 0;
             lastOriginal = null;
             lastReplacement = null;
@@ -915,13 +929,107 @@ public class UzbekIME extends InputMethodService {
 
     private void updateAutoShift() {
         if (shift == 2 || mode != 0) return;
-        InputConnection ic = getCurrentInputConnection();
+        setShift(capsNeeded() ? 1 : 0);
+    }
+
+    /** Same rules as the app's own caps mode, but worked out from the remembered text (no round trip). */
+    private boolean capsNeeded() {
         EditorInfo ei = getCurrentInputEditorInfo();
-        boolean caps = false;
-        if (ic != null && ei != null && (ei.inputType & InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
-            caps = ic.getCursorCapsMode(ei.inputType) != 0;
+        InputConnection ic = getCurrentInputConnection();
+        if (ei == null || ic == null) return false;
+        int t = ei.inputType;
+        if ((t & InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false;
+        if ((t & InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS) != 0) return true;
+        boolean words = (t & InputType.TYPE_TEXT_FLAG_CAP_WORDS) != 0;
+        boolean sentences = (t & InputType.TYPE_TEXT_FLAG_CAP_SENTENCES) != 0;
+        if (!words && !sentences) return false;
+        if (hasSelection()) return false;
+        String b = before(ic);
+        if (b.isEmpty()) return cacheFromStart;
+        char last = b.charAt(b.length() - 1);
+        if (words) return Character.isWhitespace(last);
+        if (last == '\n') return true;
+        int i = b.length() - 1;
+        while (i >= 0 && b.charAt(i) == ' ') i--;
+        if (i < 0) return cacheFromStart;
+        if (i == b.length() - 1) return false;
+        char c = b.charAt(i);
+        return c == '.' || c == '!' || c == '?' || c == '\n';
+    }
+
+    // ---------------------------------------------------------------- text cache
+    // Asking the app for text is a slow round trip to the other app, and Telegram or WhatsApp can take
+    // a while to answer. Like Gboard, the keyboard remembers the last characters before the cursor itself
+    // and asks again only when the cursor is moved by something other than our own typing.
+
+    private static final int CACHE_LEN = 64;
+    private String cache = null;             // text just before the cursor, or null when unknown
+    private boolean cacheFromStart = false;  // the cache begins at the start of the field
+    private int cursorPos = -1;              // where our own edits leave the cursor
+    private int selStart = -1;
+    private int selEnd = -1;
+    private final ArrayDeque<Integer> pending = new ArrayDeque<>();
+
+    private void resetCache(int pos) {
+        cache = null;
+        cacheFromStart = false;
+        cursorPos = pos;
+        pending.clear();
+    }
+
+    /** Something we can't predict happened (enter, editor action, key event): read again next time. */
+    private void forgetCache() {
+        cache = null;
+        cacheFromStart = false;
+        cursorPos = -1;
+        pending.clear();
+    }
+
+    private boolean hasSelection() {
+        return selStart >= 0 && selEnd >= 0 && selStart != selEnd;
+    }
+
+    private String before(InputConnection ic) {
+        if (cache == null) {
+            CharSequence cs = ic.getTextBeforeCursor(CACHE_LEN, 0);
+            cache = cs == null ? "" : cs.toString();
+            cacheFromStart = cache.length() < CACHE_LEN;
+            if (cursorPos < 0) cursorPos = selStart;
         }
-        setShift(caps ? 1 : 0);
+        return cache;
+    }
+
+    private void cachedCommit(InputConnection ic, String s) {
+        ic.commitText(s, 1);
+        if (cache != null) {
+            cache = cache + s;
+            if (cache.length() > CACHE_LEN) {
+                cache = cache.substring(cache.length() - CACHE_LEN);
+                cacheFromStart = false;
+            }
+        }
+        if (cursorPos >= 0) cursorPos += s.length();
+    }
+
+    private void cachedDelete(InputConnection ic, int n) {
+        ic.deleteSurroundingText(n, 0);
+        if (cache != null) {
+            if (cache.length() >= n) {
+                cache = cache.substring(0, cache.length() - n);
+                if (!cacheFromStart && cache.length() < 8) cache = null;
+            } else {
+                cache = null;
+            }
+        }
+        if (cursorPos >= 0) cursorPos = Math.max(0, cursorPos - n);
+    }
+
+    /** Remembers where our edit leaves the cursor, so the app's report about it is recognised as ours. */
+    private void markPending() {
+        if (cursorPos >= 0) {
+            pending.addLast(cursorPos);
+            while (pending.size() > 32) pending.pollFirst();
+        }
     }
 
     // ---------------------------------------------------------------- text
@@ -969,11 +1077,6 @@ public class UzbekIME extends InputMethodService {
         return null;
     }
 
-    private boolean hasSelection(InputConnection ic) {
-        CharSequence sel = ic.getSelectedText(0);
-        return sel != null && sel.length() > 0;
-    }
-
     /** Expands aa / vv before the cursor. end = what was typed after the word (may be empty). */
     private boolean tryPhrase(InputConnection ic, String before, String end) {
         String abbr = null;
@@ -987,8 +1090,8 @@ public class UzbekIME extends InputMethodService {
         }
         if (abbr == null) return false;
         ic.beginBatchEdit();
-        ic.deleteSurroundingText(abbr.length(), 0);
-        ic.commitText(phrase + end, 1);
+        cachedDelete(ic, abbr.length());
+        cachedCommit(ic, phrase + end);
         ic.endBatchEdit();
         lastOriginal = abbr + end;
         lastReplacement = phrase + end;
@@ -1000,26 +1103,35 @@ public class UzbekIME extends InputMethodService {
         if (ic == null) return;
         lastOriginal = null;
         lastReplacement = null;
-        if (enabled && s.length() == 1 && !hasSelection(ic)) {
+        if (hasSelection()) {
+            ic.commitText(s, 1);
+            forgetCache();
+            return;
+        }
+        if (enabled && s.length() == 1) {
             char c = s.charAt(0);
-            CharSequence cs = ic.getTextBeforeCursor(40, 0);
-            String before = cs == null ? "" : cs.toString();
+            String before = before(ic);
             if (before.length() > 0) {
                 char p = before.charAt(before.length() - 1);
                 String rep = replacementFor(p, c);
                 if (rep != null) {
                     ic.beginBatchEdit();
-                    ic.deleteSurroundingText(1, 0);
-                    ic.commitText(rep, 1);
+                    cachedDelete(ic, 1);
+                    cachedCommit(ic, rep);
                     ic.endBatchEdit();
+                    markPending();
                     lastOriginal = "" + p + c;
                     lastReplacement = rep;
                     return;
                 }
             }
-            if (isEndChar(c) && tryPhrase(ic, before, s)) return;
+            if (isEndChar(c) && tryPhrase(ic, before, s)) {
+                markPending();
+                return;
+            }
         }
-        ic.commitText(s, 1);
+        cachedCommit(ic, s);
+        markPending();
     }
 
     private void enter() {
@@ -1027,47 +1139,48 @@ public class UzbekIME extends InputMethodService {
         if (ic == null) return;
         lastOriginal = null;
         lastReplacement = null;
-        if (enabled && !hasSelection(ic)) {
-            CharSequence cs = ic.getTextBeforeCursor(40, 0);
-            tryPhrase(ic, cs == null ? "" : cs.toString(), "");
-        }
+        if (enabled && !hasSelection() && tryPhrase(ic, before(ic), "")) markPending();
         int action = imeAction();
         if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
             ic.performEditorAction(action);
         } else {
             sendKeyChar('\n');
         }
+        forgetCache();
     }
 
     private void doDelete() {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
-        if (hasSelection(ic)) {
+        if (hasSelection()) {
             ic.commitText("", 1);
+            forgetCache();
             lastOriginal = null;
             lastReplacement = null;
             return;
         }
+        String b = before(ic);
         if (lastReplacement != null && lastOriginal != null) {
             String rep = lastReplacement;
             String orig = lastOriginal;
             lastOriginal = null;
             lastReplacement = null;
-            CharSequence b = ic.getTextBeforeCursor(rep.length(), 0);
-            if (b != null && b.toString().equals(rep)) {
+            if (b.endsWith(rep)) {
                 ic.beginBatchEdit();
-                ic.deleteSurroundingText(rep.length(), 0);
-                ic.commitText(orig, 1);
+                cachedDelete(ic, rep.length());
+                cachedCommit(ic, orig);
                 ic.endBatchEdit();
+                markPending();
                 return;
             }
         }
-        CharSequence b = ic.getTextBeforeCursor(2, 0);
-        if (b == null || b.length() == 0) {
+        if (b.isEmpty()) {
             sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
+            forgetCache();
             return;
         }
-        int n = (b.length() == 2 && Character.isSurrogatePair(b.charAt(0), b.charAt(1))) ? 2 : 1;
-        ic.deleteSurroundingText(n, 0);
+        int n = (b.length() >= 2 && Character.isSurrogatePair(b.charAt(b.length() - 2), b.charAt(b.length() - 1))) ? 2 : 1;
+        cachedDelete(ic, n);
+        markPending();
     }
 }
