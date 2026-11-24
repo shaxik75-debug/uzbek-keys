@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.io.BufferedReader;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -19,6 +20,15 @@ public final class Updater {
             "https://github.com/shaxik75-debug/uzbek-keys/releases/download/android/version.txt";
     public static final String APK_URL =
             "https://github.com/shaxik75-debug/uzbek-keys/releases/download/android/UzbekKeys.apk";
+
+    /** What the newest build adds or fixes (same text as the release notes). */
+    public static final String WHATSNEW_URL =
+            "https://github.com/shaxik75-debug/uzbek-keys/releases/download/android/whatsnew.txt";
+
+    public interface TextCallback {
+        /** text = null when the server could not be reached. */
+        void onText(String text);
+    }
 
     private static final long INTERVAL = 6L * 60 * 60 * 1000;
 
@@ -96,6 +106,56 @@ public final class Updater {
         }
         p.edit().putLong("lastCheck", now).apply();
         check(ctx, cb);
+    }
+
+    /** "What's new" of the installed build (bundled into the APK). */
+    public static String localWhatsNew(Context c) {
+        try {
+            InputStream in = c.getAssets().open("whatsnew.txt");
+            String s = readAll(in);
+            in.close();
+            return s.trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Downloads the "what's new" of the newest build. */
+    public static void fetchWhatsNew(Context ctx, final TextCallback cb) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String text = null;
+                HttpURLConnection con = null;
+                try {
+                    con = (HttpURLConnection) new URL(WHATSNEW_URL).openConnection();
+                    con.setUseCaches(false);
+                    con.setInstanceFollowRedirects(true);
+                    con.setConnectTimeout(10000);
+                    con.setReadTimeout(10000);
+                    if (con.getResponseCode() == 200) text = readAll(con.getInputStream()).trim();
+                } catch (Exception ignored) {
+                    text = null;
+                } finally {
+                    if (con != null) con.disconnect();
+                }
+                final String t = text;
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        cb.onText(t);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private static String readAll(InputStream in) throws Exception {
+        BufferedReader r = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = r.readLine()) != null) sb.append(line).append('\n');
+        return sb.toString();
     }
 
     public static void openDownload(Context ctx) {
