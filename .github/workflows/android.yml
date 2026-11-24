@@ -8,6 +8,7 @@ on:
       - '.github/workflows/android.yml'
       - 'tools/make_icon.py'
       - 'whatsnew.txt'
+      - 'whatsnew-android.txt'
   workflow_dispatch:
 
 permissions:
@@ -43,8 +44,10 @@ jobs:
 
       - name: Bundle "what's new"
         run: |
+          # whatsnew-android.txt (if present) describes changes made only on Android.
+          if [ -f whatsnew-android.txt ]; then cp whatsnew-android.txt notes.txt; else cp whatsnew.txt notes.txt; fi
           mkdir -p android/app/src/main/assets
-          cp whatsnew.txt android/app/src/main/assets/whatsnew.txt
+          cp notes.txt android/app/src/main/assets/whatsnew.txt
 
       - name: Signing key
         env:
@@ -61,13 +64,14 @@ jobs:
       - name: Prepare files
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk UzbekKeys.apk
+          cp notes.txt whatsnew.txt
           echo "${{ github.run_number }}" > version.txt
           {
             echo "Android keyboard: install UzbekKeys.apk on the phone. Build ${{ github.run_number }}."
             echo
             echo "Yangiliklar / Что нового:"
             echo
-            cat whatsnew.txt
+            cat notes.txt
           } > release-notes.md
 
       - name: Publish to release "android"
