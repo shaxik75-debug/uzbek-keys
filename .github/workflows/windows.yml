@@ -36,7 +36,7 @@ jobs:
       - name: Download AutoHotkey 1.1
         shell: pwsh
         run: |
-          $urls = @('https://www.autohotkey.com/download/ahk.zip', 'https://www.autohotkey.com/download/1.1/AutoHotkey_1.1.37.02.zip')
+          $urls = @('https://github.com/AutoHotkey/AutoHotkey/releases/download/v1.1.37.02/AutoHotkey_1.1.37.02.zip', 'https://www.autohotkey.com/download/ahk.zip')
           $ok = $false
           foreach ($u in $urls) {
             try { Invoke-WebRequest -Uri $u -OutFile ahk.zip -UseBasicParsing; $ok = $true; break } catch { Write-Host "failed: $u" }
