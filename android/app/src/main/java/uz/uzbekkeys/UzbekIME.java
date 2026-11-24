@@ -811,6 +811,12 @@ public class UzbekIME extends InputMethodService {
                 return;
             default:
                 typeCommitted((mode == 0 && shift > 0) ? id.toUpperCase(Locale.ROOT) : id);
+                // Like the Apple keyboard: an apostrophe typed from the 123 layer brings the letters back (o' / g').
+                if (mode != 0 && isApos(id.charAt(0))) {
+                    mode = 0;
+                    buildKeys();
+                    updateAutoShift();
+                }
                 return;
         }
         afterEdit();
