@@ -1,6 +1,7 @@
 package uz.uzbekkeys;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
@@ -36,7 +37,7 @@ import java.util.Locale;
 /**
  * Uzbek Keys keyboard, same look and behaviour as the iPhone version.
  * While typing: o' -> ö, g' -> ğ, sh -> ş, ch -> ç (capitals too),
- * aa -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom" (whole word, after space/punctuation/enter).
+ * aa -> "Assalomu Alaykum", vv -> "Va Alaykum Assalom", rr -> "Rahmat" (whole word, after space/punctuation/enter).
  * Backspace right after a replacement brings back what was typed; the space bar shows the last replacement.
  * The "öğ" key turns replacements on and off.
  * Key popups, fast typing with several fingers, long-press o/g/s/c for ö/ğ/ş/ç,
@@ -150,12 +151,19 @@ public class UzbekIME extends InputMethodService {
         banner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         int bp = (int) dp(8);
         banner.setPadding(bp, bp, bp, bp);
-        banner.setText("Yangi versiya bor — yuklab olish / Есть обновление — скачать");
+        banner.setText("Yangi versiya bor — körish / Есть обновление — посмотреть");
         banner.setVisibility(View.GONE);
         banner.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Updater.openDownload(UzbekIME.this);
+                // Opens the app: it shows what is new in the update and the download button.
+                Intent i = new Intent(UzbekIME.this, MainActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                try {
+                    startActivity(i);
+                } catch (Exception e) {
+                    Updater.openDownload(UzbekIME.this);
+                }
                 requestHideSelf(0);
             }
         });
@@ -1087,6 +1095,9 @@ public class UzbekIME extends InputMethodService {
         } else if (endsWithWord(before, "vv")) {
             abbr = "vv";
             phrase = "Va Alaykum Assalom";
+        } else if (endsWithWord(before, "rr")) {
+            abbr = "rr";
+            phrase = "Rahmat";
         }
         if (abbr == null) return false;
         ic.beginBatchEdit();
