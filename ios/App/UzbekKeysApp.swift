@@ -40,6 +40,13 @@ struct ContentView: View {
         return "\(v) (\(b))"
     }
 
+    /// What this build adds or fixes (whatsnew.txt, bundled by the build).
+    private var whatsNew: String {
+        guard let url = Bundle.main.url(forResource: "whatsnew", withExtension: "txt"),
+              let s = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -73,7 +80,7 @@ struct ContentView: View {
 
                 Section(header: Text("Qanday foydalaniş")) {
                     Step(number: 1, text: "Odatdagidek yozing — harflar özi almaşadi:\no' → ö    g' → ğ    sh → ş    ch → ç")
-                    Step(number: 2, text: "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom")
+                    Step(number: 2, text: "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom\nrr + probel → Rahmat")
                     Step(number: 3, text: "Almaşiş kerak bölmasa (masalan, inglizça «sh») — darhol ⌫ ni bosing.")
                     Step(number: 4, text: "«öğ» tugmasi — almaşişni yoqadi / öçiradi.")
                     Step(number: 5, text: "o, g, s, c ni bosib turing — ö, ğ, ş, ç.")
@@ -82,7 +89,7 @@ struct ContentView: View {
 
                 Section(header: Text("Как пользоваться")) {
                     Step(number: 1, text: "Пишите как обычно — буквы меняются сами:\no' → ö    g' → ğ    sh → ş    ch → ç")
-                    Step(number: 2, text: "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom")
+                    Step(number: 2, text: "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom\nrr + пробел → Rahmat")
                     Step(number: 3, text: "Если замена не нужна (например, английское «sh») — сразу нажмите ⌫.")
                     Step(number: 4, text: "Кнопка «öğ» — включить / выключить замену.")
                     Step(number: 5, text: "Удерживайте o, g, s, c — ö, ğ, ş, ç.")
@@ -91,6 +98,15 @@ struct ContentView: View {
 
                 Section(header: Text("Sinab köring / Проверка")) {
                     TextField("Bu yerda yozing / Пишите здесь", text: $text)
+                }
+
+                if !whatsNew.isEmpty {
+                    Section(header: Text("Yangiliklar / Что нового")) {
+                        Text(whatsNew)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 4)
+                    }
                 }
 
                 Section(footer: Text("Ovoz va tebraniş / Звук и вибрация: Sozlamalar → Asosiy → Klaviatura → Klaviaturalar → Uzbek Keys → «Töliq ruxsat» / «Полный доступ». Klaviatura internetga çiqmaydi va matnni heç qayerga yubormaydi. Клавиатура не выходит в интернет и никуда не отправляет текст.")) {
