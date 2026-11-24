@@ -93,7 +93,7 @@ struct ContentView: View {
                     TextField("Bu yerda yozing / Пишите здесь", text: $text)
                 }
 
-                Section(footer: Text("Zvuk va tebraniş / Звук и вибрация: Sozlamalar → … → Uzbek Keys → «Toliq ruxsat» / «Полный доступ». Klaviatura internetga çiqmaydi va matnni hеç qayerga yubormaydi. Клавиатура не выходит в интернет и никуда не отправляет текст.")) {
+                Section(footer: Text("Ovoz va tebraniş / Звук и вибрация: Sozlamalar → Asosiy → Klaviatura → Klaviaturalar → Uzbek Keys → «Töliq ruxsat» / «Полный доступ». Klaviatura internetga çiqmaydi va matnni heç qayerga yubormaydi. Клавиатура не выходит в интернет и никуда не отправляет текст.")) {
                     HStack {
                         Text("Uzbek Keys \(version)")
                         Spacer()
