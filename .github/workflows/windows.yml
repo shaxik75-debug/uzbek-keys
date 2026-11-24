@@ -1,0 +1,95 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'tools/make_icon.py'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Draw icon
+        run: |
+          pip install pillow
+          python tools/make_icon.py ico uzbek.ico
+
+      - name: Download AutoHotkey 1.1
+        shell: pwsh
+        run: |
+          $urls = @('https://www.autohotkey.com/download/ahk.zip', 'https://www.autohotkey.com/download/1.1/AutoHotkey_1.1.37.02.zip')
+          $ok = $false
+          foreach ($u in $urls) {
+            try { Invoke-WebRequest -Uri $u -OutFile ahk.zip -UseBasicParsing; $ok = $true; break } catch { Write-Host "failed: $u" }
+          }
+          if (-not $ok) { throw 'cannot download AutoHotkey 1.1' }
+          Expand-Archive ahk.zip -DestinationPath ahk -Force
+          Get-ChildItem -Recurse ahk -File | ForEach-Object { $_.FullName }
+
+      - name: Check script syntax
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse ahk -Filter AutoHotkeyU32.exe | Select-Object -First 1
+          if ($exe) {
+            $p = Start-Process -FilePath $exe.FullName -ArgumentList '/ErrorStdOut','/iLib',"$env:RUNNER_TEMP\lib.ahk",'windows\uzbek_auto.ahk' -Wait -PassThru -NoNewWindow -RedirectStandardOutput syntax.txt
+            Get-Content syntax.txt
+            if ($p.ExitCode -ne 0) { throw "syntax check failed ($($p.ExitCode))" }
+          } else { Write-Host 'AutoHotkeyU32.exe not found, skipping syntax check' }
+
+      - name: Build exe
+        shell: bash
+        run: |
+          VERSION="1.${{ github.run_number }}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          python windows/tools/build.py --ahk ahk --script windows/uzbek_auto.ahk --icon uzbek.ico --version "$VERSION" --out uzbek_auto.exe
+          python windows/tools/build.py --ahk ahk --script windows/tools/selftest.ahk --icon uzbek.ico --out selftest.exe
+
+      - name: Self-test compiled exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\selftest.exe -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'self-test exe did not finish' }
+          if (-not (Test-Path selftest.txt)) { throw 'compiled exe did not run the embedded script' }
+          $r = Get-Content selftest.txt
+          Write-Host $r
+          if ($r -notmatch 'compiled=1' -or $r -notmatch 'inputhook=1') { throw "unexpected self-test result: $r" }
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Uzbek Keys ${{ env.VERSION }} for Windows
+          body: |
+            Windows build ${{ env.VERSION }}. Installed copies update themselves.
+          make_latest: 'true'
+          files: uzbek_auto.exe
+
+      - name: Tell installed copies about the new version
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          printf '%s' "$VERSION" > version.txt
+          git add version.txt
+          git commit -m "Windows $VERSION"
+          git push origin HEAD:main
