@@ -909,9 +909,9 @@ final class KeyboardViewController: UIInputViewController {
         return false
     }
 
-    /// Expands aa / vv before the cursor. end = what was typed after the word (may be empty).
+    /// Expands aa / vv / rr before the cursor. end = what was typed after the word (may be empty).
     private func tryPhrase(before: String, end: String) -> Bool {
-        let phrases = [("aa", "Assalomu Alaykum"), ("vv", "Va Alaykum Assalom")]
+        let phrases = [("aa", "Assalomu Alaykum"), ("vv", "Va Alaykum Assalom"), ("rr", "Rahmat")]
         for (abbr, phrase) in phrases where before.hasSuffix(abbr) {
             let rest = before.dropLast(abbr.count)
             if let q = rest.last, q.isLetter || q.isNumber { continue }
