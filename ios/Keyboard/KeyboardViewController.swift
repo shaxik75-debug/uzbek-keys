@@ -701,6 +701,12 @@ final class KeyboardViewController: UIInputViewController {
             return
         default:
             typeCommitted((mode == .letters && shift > 0) ? id.uppercased() : id)
+            // Like the Apple keyboard: an apostrophe typed from the 123 layer brings the letters back (o' / g').
+            if mode != .letters, let ch = id.first, isApostrophe(ch) {
+                mode = .letters
+                buildKeys()
+                updateAutoShift()
+            }
             return
         }
         afterEdit()
