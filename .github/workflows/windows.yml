@@ -50,7 +50,7 @@ jobs:
         run: |
           $exe = Get-ChildItem -Recurse ahk -Filter AutoHotkeyU32.exe | Select-Object -First 1
           if ($exe) {
-            $p = Start-Process -FilePath $exe.FullName -ArgumentList '/ErrorStdOut','/iLib',"$env:RUNNER_TEMP\lib.ahk",'windows\uzbek_auto.ahk' -Wait -PassThru -NoNewWindow -RedirectStandardOutput syntax.txt
+            $p = Start-Process -FilePath $exe.FullName -ArgumentList '/CP65001','/ErrorStdOut','/iLib',"$env:RUNNER_TEMP\lib.ahk",'windows\uzbek_auto.ahk' -Wait -PassThru -NoNewWindow -RedirectStandardOutput syntax.txt
             Get-Content syntax.txt
             if ($p.ExitCode -ne 0) { throw "syntax check failed ($($p.ExitCode))" }
           } else { Write-Host 'AutoHotkeyU32.exe not found, skipping syntax check' }
@@ -71,7 +71,7 @@ jobs:
           if (-not (Test-Path selftest.txt)) { throw 'compiled exe did not run the embedded script' }
           $r = Get-Content selftest.txt
           Write-Host $r
-          if ($r -notmatch 'compiled=1' -or $r -notmatch 'inputhook=1') { throw "unexpected self-test result: $r" }
+          if ($r -notmatch 'compiled=1' -or $r -notmatch 'inputhook=1' -or $r -notmatch 'utf8=1') { throw "unexpected self-test result: $r" }
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
