@@ -1,17 +1,20 @@
 // Draws the 1024x1024 app icon (green, four keys: ö ğ ş ç).
 // Usage (macOS): swift ios/tools/make_icon.swift <output.png>
 import AppKit
+import CoreText
 
 let size = 1024
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon-1024.png"
 
 guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
                                  bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false,
-                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else {
+                                 colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+      let gc = NSGraphicsContext(bitmapImageRep: rep) else {
     fatalError("cannot create bitmap")
 }
 NSGraphicsContext.saveGraphicsState()
-NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+NSGraphicsContext.current = gc
+let ctx = gc.cgContext
 
 let full = NSRect(x: 0, y: 0, width: size, height: size)
 let top = NSColor(calibratedRed: 0.20, green: 0.66, blue: 0.33, alpha: 1)
@@ -33,12 +36,16 @@ for (i, ch) in letters.enumerated() {
     NSBezierPath(roundedRect: r.offsetBy(dx: 0, dy: -14), xRadius: 64, yRadius: 64).fill()
     NSColor.white.setFill()
     NSBezierPath(roundedRect: r, xRadius: 64, yRadius: 64).fill()
-    let s = NSAttributedString(string: ch, attributes: [.font: font, .foregroundColor: ink])
-    let b = s.boundingRect(with: NSSize(width: keyW, height: keyW), options: [.usesLineFragmentOrigin])
-    let glyph = s.boundingRect(with: NSSize(width: keyW, height: keyW), options: [.usesLineFragmentOrigin, .usesDeviceMetrics])
-    let x = r.midX - b.width / 2
-    let y = r.midY - (glyph.minY + glyph.height / 2) - (b.height - glyph.maxY) * 0
-    s.draw(at: NSPoint(x: x, y: y - (b.height / 2 - (glyph.maxY - glyph.height / 2)) + b.height / 2 - b.height / 2))
+
+    let attrs: [NSAttributedString.Key: Any] = [
+        .font: font,
+        .foregroundColor: ink,
+        NSAttributedString.Key(kCTForegroundColorAttributeName as String): ink.cgColor
+    ]
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: ch, attributes: attrs))
+    let glyphs = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+    ctx.textPosition = CGPoint(x: r.midX - glyphs.midX, y: r.midY - glyphs.midY)
+    CTLineDraw(line, ctx)
 }
 
 NSGraphicsContext.restoreGraphicsState()
