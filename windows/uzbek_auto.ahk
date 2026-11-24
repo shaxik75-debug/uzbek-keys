@@ -3,7 +3,7 @@
 #SingleInstance Force
 
 ; Uzbek Keys for Windows (AutoHotkey v1.1). Built into uzbek_auto.exe by .github/workflows/windows.yml,
-; which also sets AppVersion below and publishes the update. Keep this file ASCII-only.
+; which also sets AppVersion below and publishes the update. Saved as UTF-8. Author: işax.
 
 ; ==================== SETTINGS ====================
 AppVersion := "1.0"
@@ -36,11 +36,17 @@ GroupAdd, NoUzbek, ahk_exe idea64.exe
 ; ---- Tray menu ----
 StartupLink := A_Startup "\Uzbek Keys.lnk"
 TitleItem := "Uzbek Keys " AppVersion
+AuthorItem := "by işax"
+HelpItem := "Qanday foydalaniş / Инструкция"
+TipText := TitleItem " — " AuthorItem
 Menu, Tray, NoStandard
-Menu, Tray, Tip, %TitleItem%
+Menu, Tray, Tip, %TipText%
 Menu, Tray, Add, %TitleItem%, TrayNoop
 Menu, Tray, Disable, %TitleItem%
+Menu, Tray, Add, %AuthorItem%, TrayNoop
+Menu, Tray, Disable, %AuthorItem%
 Menu, Tray, Add
+Menu, Tray, Add, %HelpItem%, TrayHelp
 Menu, Tray, Add, Check for updates, TrayCheck
 Menu, Tray, Add, Start with Windows, TrayStartup
 Menu, Tray, Add
@@ -50,6 +56,40 @@ if FileExist(StartupLink)
 
 ; First update check 5 seconds after start, then every 6 hours.
 SetTimer, AutoCheck, -5000
+
+HelpText =
+(
+Özbek harflari / Узбекские буквы
+
+Odatdagidek yozing — harflar özi almaşadi.
+Пишите как обычно — буквы меняются сами.
+
+o'  →  ö          g'  →  ğ
+sh  →  ş          ch  →  ç
+aa + probel / пробел  →  Assalomu Alaykum
+vv + probel / пробел  →  Va Alaykum Assalom
+
+⌫ darhol bossangiz — almaşiş bekor böladi.
+⌫ сразу после замены — вернуть как было (например, для английского «sh»).
+
+Scroll Lock yoki Ctrl+Alt+U — öçiriş / yoqiş.
+Scroll Lock или Ctrl+Alt+U — выключить / включить.
+
+Terminal va kod muharrirlarida almaşmaydi.
+В терминалах и редакторах кода замена не работает.
+
+Yangilanişlar özi örnatiladi. / Обновления ставятся сами.
+
+by işax
+)
+
+; Show the instructions once, on the first start on this computer.
+HelpSeen := A_AppData "\UzbekKeys\help-shown"
+if !FileExist(HelpSeen) {
+    FileCreateDir, %A_AppData%\UzbekKeys
+    FileAppend, 1, %HelpSeen%
+    SetTimer, TrayHelp, -1500
+}
 
 ScrollLock::
 ^!u::
@@ -68,6 +108,10 @@ AutoCheck:
 return
 
 TrayNoop:
+return
+
+TrayHelp:
+    MsgBox, 64, Uzbek Keys %AppVersion% — by işax, %HelpText%
 return
 
 TrayCheck:
