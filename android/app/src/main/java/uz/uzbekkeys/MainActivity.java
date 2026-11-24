@@ -16,7 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-/** Setup screen: instructions, turn the keyboard on, choose it, try it, check for updates. by işax */
+/** Setup screen: instructions, turn the keyboard on, choose it, try it, what's new, check for updates. by işax */
 public class MainActivity extends Activity {
 
     private static final int GREEN = 0xFF29923F;
@@ -25,6 +25,9 @@ public class MainActivity extends Activity {
     private TextView status;
     private TextView updateText;
     private Button downloadButton;
+    private TextView newText;
+    private TextView updateHeading;
+    private ScrollView scroll;
 
     private int dp(float v) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
@@ -67,6 +70,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         ScrollView sv = new ScrollView(this);
+        scroll = sv;
         LinearLayout l = new LinearLayout(this);
         l.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(20);
@@ -105,7 +109,7 @@ public class MainActivity extends Activity {
         heading(l, "Qanday foydalaniş");
         steps(l,
                 "Odatdagidek yozing — harflar özi almaşadi:\no' → ö    g' → ğ    sh → ş    ch → ç",
-                "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom",
+                "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom\nrr + probel → Rahmat",
                 "Almaşiş kerak bölmasa (masalan, inglizça «sh») — darhol ⌫ ni bosing.",
                 "«öğ» tugmasi — almaşişni yoqadi / öçiradi.",
                 "o, g, s, c ni bosib turing — ö, ğ, ş, ç.",
@@ -114,7 +118,7 @@ public class MainActivity extends Activity {
         heading(l, "Как пользоваться");
         steps(l,
                 "Пишите как обычно — буквы меняются сами:\no' → ö    g' → ğ    sh → ş    ch → ç",
-                "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom",
+                "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom\nrr + пробел → Rahmat",
                 "Если замена не нужна (например, английское «sh») — сразу нажмите ⌫.",
                 "Кнопка «öğ» — включить / выключить замену.",
                 "Удерживайте o, g, s, c — ö, ğ, ş, ç.",
@@ -126,8 +130,10 @@ public class MainActivity extends Activity {
         test.setMinLines(3);
         l.addView(test, new LinearLayout.LayoutParams(-1, -2));
 
-        heading(l, "Yangilaniş / Обновления");
+        updateHeading = heading(l, "Yangilaniş / Обновления");
         updateText = text(l, "", 14);
+        newText = text(l, "", 14);
+        newText.setVisibility(View.GONE);
         button(l, "Yangilanişni tekşiriş / Проверить обновления", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -141,6 +147,12 @@ public class MainActivity extends Activity {
             }
         });
         downloadButton.setVisibility(View.GONE);
+
+        String mine = Updater.localWhatsNew(this);
+        if (mine.length() > 0) {
+            heading(l, "Yangiliklar / Что нового (" + Updater.localName(this) + ")");
+            text(l, mine, 14);
+        }
 
         TextView footer = text(l, "Uzbek Keys " + Updater.localName(this) + "  ·  " + AUTHOR, 13);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -179,6 +191,21 @@ public class MainActivity extends Activity {
         status.setText(s);
     }
 
+    /** Shows what the new build adds or fixes, above the download button. */
+    private void showRemoteWhatsNew() {
+        Updater.fetchWhatsNew(this, new Updater.TextCallback() {
+            @Override
+            public void onText(String t) {
+                if (t == null || t.length() == 0) {
+                    newText.setVisibility(View.GONE);
+                    return;
+                }
+                newText.setText("Yangi versiyada / В новой версии:\n" + t);
+                newText.setVisibility(View.VISIBLE);
+            }
+        });
+    }
+
     private void checkUpdate() {
         updateText.setText("Tekşirilmoqda… / Проверяю…");
         Updater.check(this, new Updater.Callback() {
@@ -187,12 +214,21 @@ public class MainActivity extends Activity {
                 if (remote < 0) {
                     updateText.setText("Internet yöq / Нет связи с сервером обновлений");
                     downloadButton.setVisibility(View.GONE);
+                    newText.setVisibility(View.GONE);
                 } else if (remote > local) {
                     updateText.setText("Yangi versiya: " + remote + " (sizda " + local + ") / Есть новая версия");
                     downloadButton.setVisibility(View.VISIBLE);
+                    showRemoteWhatsNew();
+                    scroll.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            scroll.smoothScrollTo(0, updateHeading.getTop());
+                        }
+                    });
                 } else {
                     updateText.setText("Eng söngi versiya / Последняя версия (" + local + ")");
                     downloadButton.setVisibility(View.GONE);
+                    newText.setVisibility(View.GONE);
                 }
             }
         });
