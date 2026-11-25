@@ -1,0 +1,2 @@
+- Qisqartmalar bosh harf bilan ham işlaydi: Aa, AA → Assalomu Alaykum; Vv, VV → Va Alaykum Assalom; Rr, RR → Rahmat.
+  Сокращения работают и с заглавной буквы: Aa, AA → Assalomu Alaykum; Vv, VV → Va Alaykum Assalom; Rr, RR → Rahmat.
