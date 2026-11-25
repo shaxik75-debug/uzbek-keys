@@ -8,6 +8,7 @@ on:
       - 'tools/make_icon.py'
       - '.github/workflows/windows.yml'
       - 'whatsnew.txt'
+      - 'whatsnew-windows.txt'
   workflow_dispatch:
 
 permissions:
@@ -61,13 +62,15 @@ jobs:
         run: |
           VERSION="1.${{ github.run_number }}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          python windows/tools/build.py --ahk ahk --script windows/uzbek_auto.ahk --icon uzbek.ico --version "$VERSION" --whatsnew whatsnew.txt --out uzbek_auto.exe
+          # whatsnew-windows.txt (if present) describes changes made only on Windows.
+          if [ -f whatsnew-windows.txt ]; then cp whatsnew-windows.txt notes.txt; else cp whatsnew.txt notes.txt; fi
+          python windows/tools/build.py --ahk ahk --script windows/uzbek_auto.ahk --icon uzbek.ico --version "$VERSION" --whatsnew notes.txt --out uzbek_auto.exe
           {
             echo "Windows build $VERSION. Installed copies update themselves."
             echo
             echo "Yangiliklar / Что нового:"
             echo
-            cat whatsnew.txt
+            cat notes.txt
           } > release-notes.md
           python windows/tools/build.py --ahk ahk --script windows/tools/selftest.ahk --icon uzbek.ico --out selftest.exe
 
