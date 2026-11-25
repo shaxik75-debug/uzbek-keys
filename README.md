@@ -10,7 +10,7 @@
 | `o'` → **ö** | `g'` → **ğ** |
 | `sh` → **ş** | `ch` → **ç** |
 | `aa` + probel → **Assalomu Alaykum** | `vv` + probel → **Va Alaykum Assalom** |
-| `rr` + probel → **Rahmat** | |
+| `rr` + probel → **Rahmat** | Aa, AA ham işlaydi / работают и Aa, AA |
 
 ## Yuklab oliş / Скачать
 
@@ -26,6 +26,7 @@
 4. Telefonda: o, g, s, c ni bosib turing — ö, ğ, ş, ç. Ikki marta probel — nuqta. Probelni bosib turib suring — kursor.
 5. Yangilanişlar özi örnatiladi (Windows va Android).
 6. Har bir yangilanişda nima qöşilgani va tuzatilgani — **«Yangiliklar / Что нового»** bölimida (ilovada va Windows trey menyusida).
+7. Telefonda: 🇺🇿 Yangi lotin, Oʻzbekcha, Ўзбекча, 🇷🇺 Русский, 🇺🇸 English klaviaturalari (bayroqli tugma), smayliklar, söz takliflari, tugmalar rangi / şakli / balandligi / qalinligi, ovoz. Android: sozlamalar ilovada; iPhone: klaviaturadagi ⚙ tugmasida.
 
 ## Как пользоваться
 
@@ -35,6 +36,7 @@
 4. На телефоне: удерживайте o, g, s, c — ö, ğ, ş, ç. Два пробела — точка. Удерживайте пробел и ведите пальцем — курсор.
 5. Обновления ставятся сами (Windows и Android).
 6. Что добавлено и исправлено в каждом обновлении — в разделе **«Yangiliklar / Что нового»** (в приложении и в меню значка Windows).
+7. На телефоне: клавиатуры 🇺🇿 Yangi lotin, Oʻzbekcha, Ўзбекча, 🇷🇺 Русский, 🇺🇸 English (кнопка с флагом), смайлики, подсказки слов, цвет / форма / высота / жирность клавиш, громкость. Android: настройки в приложении; iPhone: кнопка ⚙ на клавиатуре.
 
 ### Windows
 Faylni Hujjatlar papkasiga qöying va işga tuşiring. Trey menyusida: yöriqnoma, yangilaniş, Windows bilan birga işga tuşiş.
