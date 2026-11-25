@@ -1,0 +1,8 @@
+- Yangi klaviaturalar: 🇺🇿 Oʻzbekcha (oʻ gʻ), 🇺🇿 Ўзбекча, 🇷🇺 Русский, 🇺🇸 English — bayroqli tugma bilan almaştiriladi.
+  Новые клавиатуры: Oʻzbekcha, Ўзбекча (кириллица), Русский, English — переключаются кнопкой с флагом.
+- ☺ Smayliklar / Смайлики.
+- Söz takliflari: klaviatura köp yozgan sözlaringizni eslab qoladi.
+  Подсказки слов: клавиатура запоминает ваши частые слова.
+- Aa, AA ham işlaydi (aa, vv, rr) / Сокращения работают и с заглавной: Aa, AA.
+- ⚙ Sozlamalar klaviatura içida: klaviaturalarni yoqiş / öçiriş, tugmalar rangi (bir rang, kamalak, har biri özgaça), şakli (dumaloq), balandligi, qalinligi, ovoz balandligi, mavzu.
+  ⚙ Настройки внутри клавиатуры: включение клавиатур, цвет клавиш (один цвет, радуга, каждая своя), форма (круглые), высота, жирность, громкость, тема.
