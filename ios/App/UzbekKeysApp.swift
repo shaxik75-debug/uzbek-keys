@@ -80,20 +80,24 @@ struct ContentView: View {
 
                 Section(header: Text("Qanday foydalaniş")) {
                     Step(number: 1, text: "Odatdagidek yozing — harflar özi almaşadi:\no' → ö    g' → ğ    sh → ş    ch → ç")
-                    Step(number: 2, text: "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom\nrr + probel → Rahmat")
+                    Step(number: 2, text: "aa + probel → Assalomu Alaykum\nvv + probel → Va Alaykum Assalom\nrr + probel → Rahmat\n(Aa va AA ham işlaydi)")
                     Step(number: 3, text: "Almaşiş kerak bölmasa (masalan, inglizça «sh») — darhol ⌫ ni bosing.")
-                    Step(number: 4, text: "«öğ» tugmasi — almaşişni yoqadi / öçiradi.")
-                    Step(number: 5, text: "o, g, s, c ni bosib turing — ö, ğ, ş, ç.")
-                    Step(number: 6, text: "Ikki marta probel — nuqta. Probelni bosib turib suring — kursor yuradi.")
+                    Step(number: 4, text: "Bayroqli tugma (🇺🇿 YA) — klaviaturani almaştiradi: Yangi lotin, Oʻzbekcha, Ўзбекча, Русский, English.")
+                    Step(number: 5, text: "☺ — smayliklar. «öğ» tugmasi — almaşişni yoqadi / öçiradi.")
+                    Step(number: 6, text: "Klaviatura köp yozgan sözlaringizni eslab qoladi va tepada taklif qiladi.")
+                    Step(number: 7, text: "⚙ (klaviatura tepasida, çapda) — sozlamalar: klaviaturalar, tugmalar rangi, şakli, balandligi, qalinligi, ovoz, mavzu.")
+                    Step(number: 8, text: "o, g, s, c ni bosib turing — ö, ğ, ş, ç. Ikki marta probel — nuqta. Probelni bosib turib suring — kursor yuradi.")
                 }
 
                 Section(header: Text("Как пользоваться")) {
                     Step(number: 1, text: "Пишите как обычно — буквы меняются сами:\no' → ö    g' → ğ    sh → ş    ch → ç")
-                    Step(number: 2, text: "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom\nrr + пробел → Rahmat")
+                    Step(number: 2, text: "aa + пробел → Assalomu Alaykum\nvv + пробел → Va Alaykum Assalom\nrr + пробел → Rahmat\n(работают и Aa, AA)")
                     Step(number: 3, text: "Если замена не нужна (например, английское «sh») — сразу нажмите ⌫.")
-                    Step(number: 4, text: "Кнопка «öğ» — включить / выключить замену.")
-                    Step(number: 5, text: "Удерживайте o, g, s, c — ö, ğ, ş, ç.")
-                    Step(number: 6, text: "Два пробела — точка. Удерживайте пробел и ведите пальцем — курсор.")
+                    Step(number: 4, text: "Кнопка с флагом (🇺🇿 YA) — сменить клавиатуру: Yangi lotin, Oʻzbekcha, Ўзбекча, Русский, English.")
+                    Step(number: 5, text: "☺ — смайлики. Кнопка «öğ» — включить / выключить замену.")
+                    Step(number: 6, text: "Клавиатура запоминает ваши частые слова и подсказывает их сверху.")
+                    Step(number: 7, text: "⚙ (над клавиатурой, слева) — настройки: клавиатуры, цвет клавиш, форма, высота, жирность, громкость, тема.")
+                    Step(number: 8, text: "Удерживайте o, g, s, c — ö, ğ, ş, ç. Два пробела — точка. Удерживайте пробел и ведите пальцем — курсор.")
                 }
 
                 Section(header: Text("Sinab köring / Проверка")) {
