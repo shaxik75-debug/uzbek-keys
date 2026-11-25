@@ -21,6 +21,7 @@ ExeURL := "https://github.com/shaxik75-debug/uzbek-keys/releases/latest/download
 ;   aa  -> Assalomu Alaykum
 ;   vv  -> Va Alaykum Assalom
 ;   rr  -> Rahmat
+;   (also Aa / AA, Vv / VV, Rr / RR)
 ; ScrollLock or Ctrl+Alt+U: switch everything off / on.
 ; Nothing is applied in terminals and code editors (list below).
 
@@ -72,6 +73,7 @@ sh  →  ş          ch  →  ç
 aa + probel / пробел  →  Assalomu Alaykum
 vv + probel / пробел  →  Va Alaykum Assalom
 rr + probel / пробел  →  Rahmat
+(Aa, AA ham işlaydi / работают и Aa, AA)
 
 ⌫ darhol bossangiz — almaşiş bekor böladi.
 ⌫ сразу после замены — вернуть как было (например, для английского «sh»).
@@ -276,10 +278,16 @@ UndoEnd(ih) {
 
 #IfWinNotActive ahk_group NoUzbek
 
-; --- Phrases: whole word only, lowercase only ---
+; --- Phrases: whole word only; aa, Aa and AA (not aA) ---
 :*0?0C:aa::Assalomu Alaykum
+:*0?0C:Aa::Assalomu Alaykum
+:*0?0C:AA::Assalomu Alaykum
 :*0?0C:vv::Va Alaykum Assalom
+:*0?0C:Vv::Va Alaykum Assalom
+:*0?0C:VV::Va Alaykum Assalom
 :*0?0C:rr::Rahmat
+:*0?0C:Rr::Rahmat
+:*0?0C:RR::Rahmat
 
 ; --- Letters: fire inside words, instantly ---
 :*?CX:o'::Rep("{U+00F6}", "o'")
