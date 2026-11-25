@@ -7,6 +7,7 @@ on:
       - 'ios/**'
       - '.github/workflows/ios.yml'
       - 'whatsnew.txt'
+      - 'whatsnew-ios.txt'
   workflow_dispatch:
 
 permissions:
@@ -29,7 +30,10 @@ jobs:
         run: swift ios/tools/make_icon.swift ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 
       - name: Bundle "what's new"
-        run: cp whatsnew.txt ios/App/whatsnew.txt
+        run: |
+          # whatsnew-ios.txt (if present) describes changes made only on iPhone.
+          if [ -f whatsnew-ios.txt ]; then cp whatsnew-ios.txt notes.txt; else cp whatsnew.txt notes.txt; fi
+          cp notes.txt ios/App/whatsnew.txt
 
       - name: Generate project
         working-directory: ios
@@ -56,7 +60,7 @@ jobs:
             echo
             echo "Yangiliklar / Что нового:"
             echo
-            cat whatsnew.txt
+            cat notes.txt
           } > release-notes.md
 
       - name: Publish to release "ios"
